@@ -1,0 +1,10 @@
+{
+  "name": "ticket-pilot",
+  "version": "0.1.0",
+  "description": "Turns an assigned Jira ticket into verified, review-ready commits.",
+  "author": {
+    "name": "Janin Culhaoglu"
+  },
+  "license": "MIT",
+  "keywords": ["jira", "commits", "workflow", "automation"]
+}

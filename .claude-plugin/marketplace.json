@@ -1,0 +1,13 @@
+{
+  "name": "ticket-pilot",
+  "owner": {
+    "name": "Janin Culhaoglu"
+  },
+  "plugins": [
+    {
+      "name": "ticket-pilot",
+      "source": "./",
+      "description": "Turns an assigned Jira ticket into verified, review-ready commits."
+    }
+  ]
+}

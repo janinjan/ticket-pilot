@@ -1,0 +1,12 @@
+#!/bin/sh
+# Entry point for the ticket-pilot CLI.
+BIN_DIR=$(cd "$(dirname "$0")" && pwd)
+PLUGIN_ROOT=$(dirname "$BIN_DIR")
+PYTHONPATH="$PLUGIN_ROOT${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH
+if [ -x /usr/bin/python3 ]; then
+    PYTHON=/usr/bin/python3
+else
+    PYTHON=python3
+fi
+exec "$PYTHON" -m ticket_pilot.cli "$@"
