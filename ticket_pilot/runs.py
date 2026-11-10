@@ -24,8 +24,11 @@ STEP_NAMES = [
 WAIT_KINDS = ("go", "question", "launch_app", "report")
 
 
-def _now() -> str:
+def now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+_now = now
 
 
 def run_id(key: str, repo: str) -> str:
@@ -134,10 +137,18 @@ def update(run_identifier: str, **fields) -> dict:
     return run
 
 
+def existing_runs() -> list:
+    """All stored runs, without creating the state directory."""
+    directory = paths.state_home() / "runs"
+    if not directory.is_dir():
+        return []
+    loaded = (load(path.stem) for path in sorted(directory.glob("*.json")))
+    return [run for run in loaded if run is not None]
+
+
 def find_by_session(session_id: str) -> dict | None:
-    for path in sorted(paths.runs_dir().glob("*.json")):
-        run = load(path.stem)
-        if run is not None and run.get("session_id") == session_id:
+    for run in existing_runs():
+        if run.get("session_id") == session_id:
             return run
     return None
 

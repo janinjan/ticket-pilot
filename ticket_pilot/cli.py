@@ -9,7 +9,7 @@ import argparse
 import json
 import sys
 
-from ticket_pilot import config, runs
+from ticket_pilot import config, hooks, runs
 
 
 def cmd_config_check(args: argparse.Namespace) -> int:
@@ -82,6 +82,15 @@ def cmd_run_set(args: argparse.Namespace) -> int:
     return _with_run(args, lambda: runs.update(args.run_id, **fields))
 
 
+def cmd_hook(args: argparse.Namespace) -> int:
+    # A hook must never disturb the Claude Code session: no output, exit 0.
+    try:
+        hooks.handle(json.loads(sys.stdin.read()))
+    except Exception:
+        pass
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tp")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -121,10 +130,19 @@ def build_parser() -> argparse.ArgumentParser:
     update.add_argument("--jira-line", choices=["yes", "no"])
     update.set_defaults(func=cmd_run_set)
 
+    hook = subparsers.add_parser("hook", help="handle a Claude Code hook event from stdin")
+    hook.add_argument("ignored", nargs="*", help=argparse.SUPPRESS)
+    hook.set_defaults(func=cmd_hook)
+
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+    if argv[:1] == ["hook"]:
+        # Hooks must stay silent and exit 0 whatever arguments they receive.
+        return cmd_hook(argparse.Namespace())
     args = build_parser().parse_args(argv)
     return args.func(args)
 
