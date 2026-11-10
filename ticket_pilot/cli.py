@@ -9,7 +9,7 @@ import argparse
 import json
 import sys
 
-from ticket_pilot import config, hooks, runs
+from ticket_pilot import commit_size, config, hooks, runs
 
 
 def cmd_config_check(args: argparse.Namespace) -> int:
@@ -91,6 +91,22 @@ def cmd_hook(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_commit_size(args: argparse.Namespace) -> int:
+    try:
+        cfg = config.load()
+    except (OSError, ValueError) as error:
+        return _fail("config file is not readable JSON: %s" % error)
+    globs = list(cfg.get("generated_globs") or []) + list(cfg.get("snapshot_globs") or [])
+    try:
+        text = commit_size.numstat(args.rev, args.staged)
+    except (OSError, ValueError) as error:
+        return _fail("cannot measure commit size: %s" % error)
+    lines = commit_size.parse_numstat(text, globs)
+    verdict = "over" if lines > cfg["max_commit_lines"] else "ok"
+    print("%d %s %s" % (lines, commit_size.size_class(lines), verdict))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tp")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -129,6 +145,11 @@ def build_parser() -> argparse.ArgumentParser:
     update.add_argument("--branch")
     update.add_argument("--jira-line", choices=["yes", "no"])
     update.set_defaults(func=cmd_run_set)
+
+    size = subparsers.add_parser("commit-size", help="measure a commit against the review threshold")
+    size.add_argument("rev", nargs="?", default="HEAD")
+    size.add_argument("--staged", action="store_true", help="measure the staged changes")
+    size.set_defaults(func=cmd_commit_size)
 
     hook = subparsers.add_parser("hook", help="handle a Claude Code hook event from stdin")
     hook.add_argument("ignored", nargs="*", help=argparse.SUPPRESS)
