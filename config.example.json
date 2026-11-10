@@ -11,15 +11,9 @@
       "main_branch": "main",
       "review": "github",
       "match": {
-        "title_prefixes": [
-          "[iOS]"
-        ],
-        "labels": [
-          "ios"
-        ],
-        "components": [
-          "iOS"
-        ]
+        "title_prefixes": ["[iOS]"],
+        "labels": ["ios"],
+        "components": ["iOS"]
       },
       "setup_command": "make bootstrap",
       "ci_review_prompt": "docs/ci-review-prompt.md",
@@ -31,15 +25,9 @@
       "main_branch": "main",
       "review": "gerrit",
       "match": {
-        "title_prefixes": [
-          "[Android]"
-        ],
-        "labels": [
-          "android"
-        ],
-        "components": [
-          "Android"
-        ]
+        "title_prefixes": ["[Android]"],
+        "labels": ["android"],
+        "components": ["Android"]
       },
       "setup_command": "./gradlew assembleDebug"
     },
@@ -49,26 +37,16 @@
       "main_branch": "main",
       "review": "github",
       "match": {
-        "title_prefixes": [
-          "[Web]"
-        ],
-        "labels": [
-          "web"
-        ],
-        "components": [
-          "Web"
-        ]
+        "title_prefixes": ["[Web]"],
+        "labels": ["web"],
+        "components": ["Web"]
       },
       "sync_command": "git fetch origin && git status --short"
     }
   ],
   "backend": {
-    "repos": [
-      "/path/to/backend-repo"
-    ],
-    "api_docs": [
-      "/path/to/backend-repo/docs/api"
-    ]
+    "repos": ["/path/to/backend-repo"],
+    "api_docs": ["/path/to/backend-repo/docs/api"]
   },
   "sync_command": "git fetch origin",
   "reviewer_agent": "ticket-pilot:reviewer",
@@ -76,8 +54,6 @@
   "terminal_app": "Terminal",
   "max_commit_lines": 999,
   "generated_globs": [],
-  "snapshot_globs": [
-    "**/__Snapshots__/**"
-  ],
+  "snapshot_globs": ["**/__Snapshots__/**"],
   "permission_mode": "default"
 }
