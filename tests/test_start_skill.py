@@ -1,0 +1,208 @@
+import os
+import re
+import unittest
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SKILL_DIR = os.path.join(ROOT, "skills", "start")
+SKILL_PATH = os.path.join(SKILL_DIR, "SKILL.md")
+REFERENCES = ["references/test-plan-format.md", "references/commit-splitting.md"]
+STEP_HEADING = re.compile(r"^## Step (\d+) — ", re.MULTILINE)
+SEND_COMMANDS = ("git push", "git review", "gh pr create")
+NOT_RUN_MARKERS = ("do not run", "never run")
+
+
+def read(path):
+    with open(path, encoding="utf-8") as handle:
+        return handle.read()
+
+
+def skill():
+    return read(SKILL_PATH)
+
+
+def frontmatter(text):
+    lines = text.split("\n")
+    if not lines or lines[0].strip() != "---":
+        return {}
+    fields = {}
+    for line in lines[1:]:
+        if line.strip() == "---":
+            return fields
+        key, separator, value = line.partition(":")
+        if separator and not line.startswith((" ", "\t")):
+            fields[key.strip()] = value.strip().strip('"')
+    return {}
+
+
+def step_sections(text):
+    matches = list(STEP_HEADING.finditer(text))
+    sections = {}
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        sections[int(match.group(1))] = text[match.start():end]
+    return sections
+
+
+def skill_files():
+    return [SKILL_PATH] + [os.path.join(SKILL_DIR, name) for name in REFERENCES]
+
+
+class StartSkillTests(unittest.TestCase):
+    def test_frontmatter(self):
+        fields = frontmatter(skill())
+        self.assertEqual(fields.get("name"), "start")
+        self.assertIn("Jira ticket", fields.get("description", ""))
+        self.assertEqual(fields.get("argument-hint"), "<JIRA-KEY>")
+
+    def test_has_ten_step_headings(self):
+        numbers = [int(number) for number in STEP_HEADING.findall(skill())]
+        self.assertEqual(numbers, list(range(1, 11)))
+
+    def test_absolute_rule_first(self):
+        text = skill()
+        step_one = text.index("## Step 1 — ")
+        rule = text.lower().find("nothing visible to others without an explicit yes")
+        self.assertNotEqual(rule, -1, "absolute rule is missing")
+        self.assertLess(rule, step_one)
+        head = text[:step_one].lower()
+        for action in ["push", "pull request", "comment", "vote", "jira transition", "slack message"]:
+            with self.subTest(action=action):
+                self.assertIn(action, head)
+
+    def test_each_step_records_progress(self):
+        sections = step_sections(skill())
+        self.assertEqual(sorted(sections), list(range(1, 11)))
+        for number, section in sections.items():
+            with self.subTest(step=number):
+                self.assertRegex(section, r'tp"? run-step <id> %d\b' % number)
+
+    def test_waits_are_recorded(self):
+        text = skill()
+        for kind in ["go", "question", "launch_app"]:
+            with self.subTest(kind=kind):
+                self.assertRegex(text, r'tp"? run-wait <id> %s "' % kind)
+
+    def test_never_pushes(self):
+        for path in skill_files():
+            for number, line in enumerate(read(path).split("\n"), start=1):
+                lowered = line.lower()
+                if any(command in lowered for command in SEND_COMMANDS):
+                    with self.subTest(file=os.path.relpath(path, ROOT), line=number):
+                        self.assertTrue(
+                            any(marker in lowered for marker in NOT_RUN_MARKERS),
+                            "send command without 'do not run': %s" % line,
+                        )
+
+    def test_no_co_authored_by_instruction(self):
+        self.assertIn("never add co-authored-by", skill().lower())
+
+    def test_commit_size_used_before_commit(self):
+        section = step_sections(skill())[9]
+        size = section.find("commit-size --staged")
+        commit = section.find("git commit")
+        self.assertNotEqual(size, -1, "step 9 must measure staged changes")
+        self.assertNotEqual(commit, -1, "step 9 must show the commit command")
+        self.assertLess(size, commit)
+
+    def test_jira_line_only_when_validated(self):
+        text = skill()
+        self.assertIn("--jira-line", text)
+        self.assertIn("JIRA: <KEY>", step_sections(text)[9])
+
+    def test_run_is_done_at_the_end(self):
+        self.assertRegex(step_sections(skill())[10], r'tp"? run-done <id>')
+
+    def test_references_exist_and_are_linked(self):
+        text = skill()
+        for name in REFERENCES:
+            with self.subTest(reference=name):
+                self.assertTrue(os.path.isfile(os.path.join(SKILL_DIR, name)))
+                self.assertIn(name, text)
+
+    def test_references_are_used_at_their_steps(self):
+        sections = step_sections(skill())
+        self.assertIn("references/test-plan-format.md", sections[7])
+        self.assertIn("references/commit-splitting.md", sections[9])
+
+    def test_reviewer_input_missing_is_not_a_pass(self):
+        texts = {
+            "step 9": step_sections(skill())[9],
+            "commit-splitting": read(os.path.join(SKILL_DIR, "references/commit-splitting.md")),
+        }
+        for name, text in texts.items():
+            with self.subTest(source=name):
+                self.assertIn("a reason not starting with `INPUT MISSING:`", text)
+                self.assertIn("re-run the reviewer", text)
+
+    def test_split_unstages_before_first_commit(self):
+        section = step_sections(skill())[9]
+        measure = section.find("git add -A")
+        unstage = section.find('git -C "<worktree>" reset -q')
+        self.assertNotEqual(unstage, -1, "step 9 must unstage before splitting")
+        self.assertLess(measure, unstage)
+        reference = read(os.path.join(SKILL_DIR, "references/commit-splitting.md"))
+        self.assertIn('git -C "<worktree>" reset -q', reference)
+
+    def test_resume_and_prepare_reuse_the_run_worktree(self):
+        text = skill()
+        resume = text[text.index("## Resume"):]
+        self.assertIn("only if they are recorded", resume)
+        self.assertNotIn("If the run was waiting", resume)
+        prepare = step_sections(text)[2]
+        self.assertIn("belongs to this run", prepare)
+        self.assertIn("reuse it", prepare)
+        self.assertRegex(prepare, r'tp"? run-wait <id> question "')
+
+    def test_resume_recomputes_the_base_commit(self):
+        text = skill()
+        command = re.search(r"`(git -C \"<worktree>\" merge-base [^`]+)`", step_sections(text)[2])
+        self.assertIsNotNone(command, "step 2 must compute <base> with merge-base")
+        resume = text[text.index("## Resume"):]
+        recompute = resume.find(command.group(1))
+        self.assertNotEqual(recompute, -1, "resume must recompute <base> as step 2 does")
+        self.assertIn("step 3 or later", resume)
+        self.assertLess(recompute, resume.index("restart it with `run-step`"))
+
+    def test_ticket_key_is_normalized_and_validated(self):
+        from ticket_pilot import runs
+        head = skill()[:skill().index("## Absolute rule")]
+        self.assertIn("first word", head)
+        self.assertIn("uppercase", head)
+        self.assertIn("`%s`" % runs.KEY_PATTERN, head)
+        self.assertIn("stop", head)
+        self.assertIn("`/ticket-pilot:start <KEY>`", head)
+
+    def test_merged_code_is_read_from_the_remote_branch(self):
+        section = step_sections(skill())[3]
+        self.assertIn('git -C "<repo>" log origin/<main_branch> --grep', section)
+        self.assertIn('git -C "<repo>" grep', section)
+        self.assertIn("never their working tree", section)
+
+    def test_absolute_rule_has_a_catch_all(self):
+        text = skill()
+        head = text[:text.index("## Step 1 — ")].lower()
+        self.assertIn("any other action that someone else can see or that changes a shared system", head)
+        self.assertIn("nothing visible to others without an explicit yes", step_sections(text)[3].lower())
+
+
+    def test_test_plan_format_forbids_code_references(self):
+        text = read(os.path.join(SKILL_DIR, "references", "test-plan-format.md")).lower()
+        self.assertIn("no code references", text)
+        for word in ("file paths", "path:line", "endpoint paths", "backticks"):
+            self.assertIn(word, text)
+
+    def test_test_plan_example_has_no_code(self):
+        text = read(os.path.join(SKILL_DIR, "references", "test-plan-format.md"))
+        example = text[text.index("## Example"):].split("```")[1]
+        self.assertNotIn("`", example)
+        self.assertIsNone(re.search(r"\w/\w", example))
+        self.assertIsNone(re.search(r":\d+", example))
+
+    def test_report_has_a_coverage_list(self):
+        text = skill()
+        self.assertIn("Coverage", step_sections(text)[7])
+        self.assertIn("Coverage", step_sections(text)[10])
+
+
+if __name__ == "__main__":
+    unittest.main()

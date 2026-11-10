@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 from datetime import datetime, timezone
 
@@ -23,6 +24,9 @@ STEP_NAMES = [
 
 WAIT_KINDS = ("go", "question", "launch_app", "report")
 
+KEY_PATTERN = r"[A-Z][A-Z0-9]+-\d+"
+REPO_PATTERN = r"[A-Za-z0-9._-]+"
+
 
 def now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -31,7 +35,16 @@ def now() -> str:
 _now = now
 
 
+def validate(key: str, repo: str) -> None:
+    """Raise ValueError unless key and repo are safe to name a run file."""
+    if not isinstance(key, str) or not re.fullmatch(KEY_PATTERN, key):
+        raise ValueError("invalid ticket key: %r (expected %s)" % (key, KEY_PATTERN))
+    if not isinstance(repo, str) or not re.fullmatch(REPO_PATTERN, repo):
+        raise ValueError("invalid repo name: %r (expected %s)" % (repo, REPO_PATTERN))
+
+
 def run_id(key: str, repo: str) -> str:
+    validate(key, repo)
     return "%s--%s" % (key, repo)
 
 

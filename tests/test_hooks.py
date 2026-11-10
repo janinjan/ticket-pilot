@@ -72,6 +72,14 @@ class BindingTests(HooksTestCase):
         self.assertEqual(pending["cwd"], self.repo)
         self.assertIn("created_at", pending)
 
+    def test_start_prompt_key_must_be_a_whole_word(self):
+        runs.start("ABC-1", "app", self.repo)
+        hooks.handle(self.start_prompt(key="ABC-1x"))
+        self.assertIsNone(runs.load("ABC-1--app")["session_id"])
+        self.assertFalse(self.pending_path().exists())
+        hooks.handle(self.start_prompt(key="ABC-1 please"))
+        self.assertEqual(runs.load("ABC-1--app")["session_id"], "s1")
+
     def test_pending_record_resolves_on_later_event(self):
         hooks.handle(self.start_prompt())
         runs.start("ABC-1", "app", self.repo)

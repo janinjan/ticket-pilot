@@ -10,7 +10,7 @@ from pathlib import Path
 
 from ticket_pilot import paths, runs
 
-START_PROMPT = re.compile(r"^/ticket-pilot:start\s+([A-Z][A-Z0-9]+-\d+)")
+START_PROMPT = re.compile(r"^/ticket-pilot:start\s+(%s)(?!\S)" % runs.KEY_PATTERN)
 SAFE_SESSION_ID = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9._-]*$")
 PENDING_MAX_AGE = timedelta(hours=24)
 

@@ -42,7 +42,11 @@ def _with_run(args: argparse.Namespace, action) -> int:
 
 
 def cmd_run_start(args: argparse.Namespace) -> int:
-    print(runs.start(args.key, args.repo, args.repo_path)["id"])
+    try:
+        run = runs.start(args.key, args.repo, args.repo_path)
+    except ValueError as error:
+        return _fail(str(error))
+    print(run["id"])
     return 0
 
 

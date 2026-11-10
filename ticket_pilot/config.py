@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from pathlib import Path
 
-from ticket_pilot import paths
+from ticket_pilot import paths, runs
 
 DEFAULTS = {
     "max_commit_lines": 999,
@@ -69,6 +70,9 @@ def validate(cfg: dict) -> list[str]:
         name = repo.get("name")
         if not isinstance(name, str) or not name:
             problems.append("repos[%d].name must be a non-empty string" % index)
+            continue
+        if not re.fullmatch(runs.REPO_PATTERN, name):
+            problems.append("repos[%d].name must match ^%s$" % (index, runs.REPO_PATTERN))
             continue
         if name in seen:
             problems.append("repos[%s].name is duplicated" % name)

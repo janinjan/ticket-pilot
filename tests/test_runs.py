@@ -118,8 +118,43 @@ class RunsTests(RunsTestCase):
         self.assertEqual(runs.STEP_NAMES[0], "understand")
         self.assertEqual(runs.STEP_NAMES[-1], "report")
 
+    def test_key_pattern_is_shared_with_hooks(self):
+        from ticket_pilot import hooks
+        self.assertEqual(runs.KEY_PATTERN, r"[A-Z][A-Z0-9]+-\d+")
+        self.assertIn(runs.KEY_PATTERN, hooks.START_PROMPT.pattern)
+
+    def test_run_id_rejects_invalid_key_or_repo(self):
+        for key, repo in (
+            ("abc-1", "app"),
+            ("ABC-1x", "app"),
+            ("../ABC-1", "app"),
+            ("ABC-1", "../app"),
+            ("ABC-1", "a/b"),
+            ("ABC-1", ""),
+        ):
+            with self.assertRaises(ValueError, msg=(key, repo)):
+                runs.run_id(key, repo)
+            with self.assertRaises(ValueError, msg=(key, repo)):
+                runs.start(key, repo, "/tmp/app")
+        self.assertEqual(list(paths.state_home().rglob("*.json")), [])
+
+    def test_run_id_accepts_valid_key_and_repo(self):
+        self.assertEqual(runs.run_id("AB2-10", "my.app_1-x"), "AB2-10--my.app_1-x")
+
 
 class RunsCliTests(RunsTestCase):
+    def test_cli_run_start_rejects_invalid_key(self):
+        code, out, err = self.run_cli("run-start", "abc-1", "app", "/tmp/app")
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("invalid ticket key", err)
+        self.assertEqual(runs.existing_runs(), [])
+
+    def test_cli_run_start_rejects_invalid_repo(self):
+        code, out, err = self.run_cli("run-start", "ABC-1", "../app", "/tmp/app")
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("invalid repo name", err)
+        self.assertEqual(runs.existing_runs(), [])
+
     def test_cli_run_show_prints_json(self):
         code, out, _ = self.run_cli("run-start", "ABC-1", "app", "/tmp/app")
         self.assertEqual(code, 0)

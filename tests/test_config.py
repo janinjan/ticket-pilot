@@ -109,6 +109,14 @@ class MalformedShapeTests(unittest.TestCase):
                 repo["name"] = name
                 self.check({"repos": [repo]}, "repos[0].name must be a non-empty string")
 
+    def test_repo_name_must_match_run_pattern(self):
+        for name in ("my repo", "a/b", "ios;rm"):
+            with tempfile.TemporaryDirectory() as tmp:
+                self.check(
+                    {"repos": [minimal_repo(name, tmp)]},
+                    "repos[0].name must match ^[A-Za-z0-9._-]+$",
+                )
+
     def test_backend_repos_not_list(self):
         self.check(
             {"repos": [], "backend": {"repos": "abc"}},
