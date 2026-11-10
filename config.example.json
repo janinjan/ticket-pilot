@@ -1,0 +1,83 @@
+{
+  "jira": {
+    "site": "https://your-site.atlassian.net",
+    "email": "you@example.com",
+    "keychain_service": "ticket-pilot-jira"
+  },
+  "repos": [
+    {
+      "name": "ios",
+      "path": "/path/to/ios-repo",
+      "main_branch": "main",
+      "review": "github",
+      "match": {
+        "title_prefixes": [
+          "[iOS]"
+        ],
+        "labels": [
+          "ios"
+        ],
+        "components": [
+          "iOS"
+        ]
+      },
+      "setup_command": "make bootstrap",
+      "ci_review_prompt": "docs/ci-review-prompt.md",
+      "launch_skill": "run-ios-app"
+    },
+    {
+      "name": "android",
+      "path": "/path/to/android-repo",
+      "main_branch": "main",
+      "review": "gerrit",
+      "match": {
+        "title_prefixes": [
+          "[Android]"
+        ],
+        "labels": [
+          "android"
+        ],
+        "components": [
+          "Android"
+        ]
+      },
+      "setup_command": "./gradlew assembleDebug"
+    },
+    {
+      "name": "web",
+      "path": "/path/to/web-repo",
+      "main_branch": "main",
+      "review": "github",
+      "match": {
+        "title_prefixes": [
+          "[Web]"
+        ],
+        "labels": [
+          "web"
+        ],
+        "components": [
+          "Web"
+        ]
+      },
+      "sync_command": "git fetch origin && git status --short"
+    }
+  ],
+  "backend": {
+    "repos": [
+      "/path/to/backend-repo"
+    ],
+    "api_docs": [
+      "/path/to/backend-repo/docs/api"
+    ]
+  },
+  "sync_command": "git fetch origin",
+  "reviewer_agent": "ticket-pilot:reviewer",
+  "auditor_agent": "ticket-pilot:auditor",
+  "terminal_app": "Terminal",
+  "max_commit_lines": 999,
+  "generated_globs": [],
+  "snapshot_globs": [
+    "**/__Snapshots__/**"
+  ],
+  "permission_mode": "default"
+}
