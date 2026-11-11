@@ -227,6 +227,31 @@ class RunsCliTests(RunsTestCase):
         code, _, _ = self.run_cli("run-step", "ABC-1--app", "11")
         self.assertEqual(code, 2)
 
+    def test_cli_set_requests_replaces_the_list(self):
+        self.run_cli("run-start", "ABC-1", "app", "/tmp/app")
+        self.run_cli("run-set", "ABC-1--app", "--request", "old")
+        code, _, _ = self.run_cli(
+            "run-set", "ABC-1--app", "--request", "Show the distance", "--request", "Hide it when empty"
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            runs.load("ABC-1--app")["requests"], ["Show the distance", "Hide it when empty"]
+        )
+
+    def test_cli_run_list_prints_every_run(self):
+        self.assertEqual(self.run_cli("run-list"), (0, "", ""))
+        self.run_cli("run-start", "ABC-1", "app", "/tmp/app")
+        self.run_cli("run-start", "ABC-2", "api", "/tmp/api")
+        self.run_cli("run-step", "ABC-2--api", "3")
+        self.run_cli("run-set", "ABC-2--api", "--worktree", "/w")
+        self.run_cli("run-done", "ABC-1--app")
+        code, out, _ = self.run_cli("run-list")
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            out.splitlines(),
+            ["ABC-1--app done step 1 understand -", "ABC-2--api running step 3 research /w"],
+        )
+
     def test_cli_set_requires_a_flag(self):
         self.run_cli("run-start", "ABC-1", "app", "/tmp/app")
         code, _, _ = self.run_cli("run-set", "ABC-1--app")

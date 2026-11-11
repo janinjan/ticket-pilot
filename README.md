@@ -108,7 +108,7 @@ Paths accept `~`. Keys marked optional can be omitted.
 | `repos[].main_branch` | yes | Branch worktrees are created from (`origin/<main_branch>`) | none |
 | `repos[].review` | yes | `gerrit` or `github`: decides the command printed to send the branch | none |
 | `repos[].match` | no | `title_prefixes`, `labels`, `components`: how twin tickets of this platform are recognised | none |
-| `repos[].setup_command` | no | Command run in a new worktree (project generation, dependencies) | repo's own build skill |
+| `repos[].setup_command` | no | Command run in a new worktree and after each checkout of step 9 (project generation, generated code, dependencies) | repo's own build skill |
 | `repos[].sync_command` | no | Overrides the top-level `sync_command` for this repo | top-level, else `git fetch origin` |
 | `repos[].launch_skill` | no | Skill used to build and launch the app in step 7 | repo's own launch skill |
 | `repos[].ci_review_prompt` | no | Path relative to the repo of the prompt your CI review bot uses; passed to the reviewer (must exist) | none |
@@ -138,6 +138,7 @@ The skill reads the ticket, shows the numbered requests and asks for your go. Qu
 Useful `tp` commands (`TP_ROOT` is defined in Configure; with the alias, just `tp ...`):
 
 ```sh
+"$TP_ROOT/bin/tp" run-list                 # every run: id, status, step, worktree
 "$TP_ROOT/bin/tp" run-show <KEY>--<repo>   # state of a run
 "$TP_ROOT/bin/tp" commit-size --staged     # size of the staged change against the threshold
 ```

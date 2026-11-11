@@ -73,6 +73,14 @@ def cmd_run_show(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_run_list(args: argparse.Namespace) -> int:
+    for run in runs.existing_runs():
+        print("%s %s step %d %s %s" % (
+            run["id"], run["status"], run["step"], run["step_name"], run.get("worktree") or "-",
+        ))
+    return 0
+
+
 def cmd_run_set(args: argparse.Namespace) -> int:
     fields = {}
     if args.worktree is not None:
@@ -81,8 +89,10 @@ def cmd_run_set(args: argparse.Namespace) -> int:
         fields["branch"] = args.branch
     if args.jira_line is not None:
         fields["jira_line"] = args.jira_line == "yes"
+    if args.request is not None:
+        fields["requests"] = args.request
     if not fields:
-        return _fail("run-set needs at least one of --worktree, --branch, --jira-line")
+        return _fail("run-set needs at least one of --worktree, --branch, --jira-line, --request")
     return _with_run(args, lambda: runs.update(args.run_id, **fields))
 
 
@@ -143,11 +153,18 @@ def build_parser() -> argparse.ArgumentParser:
     show.add_argument("run_id")
     show.set_defaults(func=cmd_run_show)
 
-    update = subparsers.add_parser("run-set", help="set worktree, branch or jira-line")
+    listing = subparsers.add_parser("run-list", help="print one line per stored run")
+    listing.set_defaults(func=cmd_run_list)
+
+    update = subparsers.add_parser("run-set", help="set worktree, branch, jira-line or requests")
     update.add_argument("run_id")
     update.add_argument("--worktree")
     update.add_argument("--branch")
     update.add_argument("--jira-line", choices=["yes", "no"])
+    update.add_argument(
+        "--request", action="append",
+        help="one numbered request, in order; repeat it for each one (replaces the stored list)",
+    )
     update.set_defaults(func=cmd_run_set)
 
     size = subparsers.add_parser("commit-size", help="measure a commit against the review threshold")
