@@ -141,7 +141,7 @@ def _apply(event: dict, run: dict) -> None:
         session["state"] = "waiting"
         if run.get("status") != "done" and not run.get("waiting"):
             run["status"] = "waiting"
-            run["waiting"] = {"kind": "question", "text": "", "since": runs.now()}
+            run["waiting"] = {"kind": runs.INPUT_KIND, "text": "", "since": runs.now()}
     elif name == "Notification":
         message = event.get("message")
         session["last_notification"] = message if isinstance(message, str) else None

@@ -84,6 +84,14 @@ class RunsTests(RunsTestCase):
         self.assertEqual(run["history"][1]["step"], 1)
         self.assertNotIn("ended_at", run["history"][1])
 
+    def test_set_waiting_rejects_the_hook_only_input_kind(self):
+        run = runs.start("ABC-1", "app", "/tmp/app")
+        self.assertNotIn("input", runs.WAIT_KINDS)
+        with self.assertRaises(ValueError):
+            runs.set_waiting(run["id"], "input", "")
+        code, _, _ = self.run_cli("run-wait", "ABC-1--app", "input", "")
+        self.assertNotEqual(code, 0)
+
     def test_waiting_then_step_clears_waiting(self):
         run = runs.start("ABC-1", "app", "/tmp/app")
         run = runs.set_waiting(run["id"], "go", "Ready?")

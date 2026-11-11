@@ -23,6 +23,8 @@ STEP_NAMES = [
 ]
 
 WAIT_KINDS = ("go", "question", "launch_app", "report")
+# Set only by the Stop hook: the turn ended with no recorded question.
+INPUT_KIND = "input"
 
 KEY_PATTERN = r"[A-Z][A-Z0-9]+-\d+"
 REPO_PATTERN = r"[A-Za-z0-9._-]+"

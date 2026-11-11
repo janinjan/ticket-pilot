@@ -199,11 +199,11 @@ class BoundSessionTests(HooksTestCase):
         runs.start("ABC-1", "app", self.repo)
         hooks.handle(self.start_prompt())
 
-    def test_stop_marks_waiting(self):
+    def test_stop_marks_waiting_for_input(self):
         hooks.handle(self.event("Stop"))
         run = runs.load("ABC-1--app")
         self.assertEqual(run["status"], "waiting")
-        self.assertEqual(run["waiting"]["kind"], "question")
+        self.assertEqual(run["waiting"]["kind"], "input")
         self.assertEqual(run["waiting"]["text"], "")
         self.assertIn("since", run["waiting"])
         self.assertEqual(run["session"]["state"], "waiting")
