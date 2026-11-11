@@ -7,7 +7,19 @@ on:
 jobs:
   test:
     runs-on: macos-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: Run unit tests
         run: /usr/bin/python3 -m unittest discover -s tests -v
+  app:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select the newest Xcode
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+          swift --version
+      - name: Run Swift tests
+        run: swift test --package-path app

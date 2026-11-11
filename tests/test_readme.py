@@ -48,11 +48,17 @@ class ReadmeTests(unittest.TestCase):
         steps = re.findall(r"^\d+\. ", section("What it does"), re.M)
         self.assertEqual(len(steps), 10)
 
-    def test_menu_bar_app_is_separate(self):
-        self.assertRegex(
-            README,
-            r"menu bar app[^\n]*separate[^\n]*not part of this plugin",
-        )
+    def test_menu_bar_app_section(self):
+        app = section("Menu bar app")
+        self.assertIsNotNone(app)
+        self.assertIn("./install.sh --from-source", app)
+        self.assertIn("runs/*.json", app)
+        self.assertIn("in `app/` inside the state directory", app)
+        self.assertIn("never launches `claude` without a click", app)
+        self.assertIn("claude mcp list", app)
+        self.assertIn("Open at login", app)
+        self.assertIn("~/Applications/TicketPilot.app", app)
+        self.assertNotRegex(README, r"separate, later component")
 
     def test_installed_plugin_path_is_documented(self):
         for text in (section("Configure"), section("Usage")):

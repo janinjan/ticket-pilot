@@ -186,6 +186,12 @@ class OptionalKeyTests(unittest.TestCase):
                 problems = config.validate(config.load(write_json(tmp, {"repos": [repo]})))
             self.assertIn("repos[ios].%s must be a string" % key, problems)
 
+    def test_stuck_minutes_must_map_known_steps_to_positive_integers(self):
+        for value in ({"implement": 0}, {"nope": 10}, [], {"implement": True}, {"implement": "5"}):
+            problems = self.problems_for({"repos": [], "stuck_minutes": value})
+            self.assertTrue(any(p.startswith("stuck_minutes") for p in problems), (value, problems))
+        self.assertEqual(self.problems_for({"repos": [], "stuck_minutes": {"implement": 200}}), [])
+
     def test_ci_review_prompt_must_exist_under_repo(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo = minimal_repo("ios", tmp)

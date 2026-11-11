@@ -56,5 +56,6 @@
   "max_commit_lines": 999,
   "generated_globs": [],
   "snapshot_globs": ["**/__Snapshots__/**"],
-  "permission_mode": "default"
+  "permission_mode": "default",
+  "stuck_minutes": {"implement": 120}
 }

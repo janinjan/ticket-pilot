@@ -23,7 +23,37 @@ Progress is tracked per run in the ticket-pilot state directory, so a stopped ru
 
 The plugin also ships a read-only `reviewer` agent, a read-only `auditor` agent, hooks that track which Claude Code session belongs to which run, and the `tp` command line tool.
 
-A menu bar app that shows the runs and the questions waiting for you is a separate, later component. It is not part of this plugin.
+A macOS menu bar app that shows your runs and the questions waiting for you ships in this repository; see [Menu bar app](#menu-bar-app).
+
+## Menu bar app
+
+A small macOS app (`app/`, Swift, macOS 14 or later) that lives in the menu bar. It polls Jira for your assigned tickets, lists the runs and the questions waiting for you, and notifies you when something needs you.
+
+Install it from the sources (needs Xcode, for `swift`):
+
+```sh
+./install.sh --from-source
+```
+
+The script builds a universal binary, assembles `~/Applications/TicketPilot.app` with the version of `.claude-plugin/plugin.json`, signs it ad hoc, quits a running copy and opens the new one. Besides the build folder `app/.build` in the checkout, it writes only `~/Applications/TicketPilot.app` (creating `~/Applications` if needed) and never uses `sudo`. `swift build` warns that x86_64 is deprecated for the newest macOS target; the warning is expected and harmless. Installing from a release arrives with `/ticket-pilot:setup`.
+
+What it reads:
+
+- the run files `runs/*.json` in the state directory (`~/Library/Application Support/ticket-pilot/`, or `TICKET_PILOT_HOME`);
+- your config (`~/.config/ticket-pilot/config.json`, or `TICKET_PILOT_CONFIG`);
+- your Jira API token, from the Keychain service named by `jira.keychain_service`. The token is never written to a file or a log.
+- the disk usage of each run's worktree (with `du`), shown in that run's submenu.
+
+What it writes:
+
+- its own state in `app/` inside the state directory (tickets already seen, acknowledged questions, helper scripts);
+- when you choose "Release…" for a finished ticket: it removes that run's worktree, then its branch, then its run file, and stops at the first step git refuses. A worktree with uncommitted changes is kept, and so are the branch and the run file. A branch that is not merged is kept with the run file, but the worktree is already removed at that point; the alert gives the `git branch -D` command to run yourself, then "Release…" again finishes the job. It never deletes the repo's main branch or the branch checked out in the repo.
+
+It only reads Jira: it never transitions a ticket, comments or edits a field. It never launches `claude` without a click: a session starts only when you choose it in the menu. The one exception is the setup check, which runs `claude mcp list` when the app starts and on "Check again" to see whether the Atlassian and Figma servers are connected.
+
+Permissions: the first launch asks to allow notifications (System Settings > Notifications > TicketPilot). The app is signed ad hoc, so macOS may ask again to allow it to read the Jira token from the Keychain after each reinstall; choose Allow (or Always Allow), then "Check again". The app turns on "Open at login" the first time it starts; you can turn it off in its menu.
+
+Uninstall: uncheck "Open at login" in the menu, quit the app, then delete `~/Applications/TicketPilot.app`. Its state in `app/` can be deleted too; the runs are not affected.
 
 ## Install
 
@@ -118,13 +148,14 @@ Paths accept `~`. Keys marked optional can be omitted.
 | `sync_command` | no | Command that syncs a repo before a worktree is created | `git fetch origin` |
 | `reviewer_agent` | no | Agent type used as reviewer | `ticket-pilot:reviewer` |
 | `auditor_agent` | no | Agent type used as auditor | `ticket-pilot:auditor` |
-| `terminal_app` | no | Terminal application used by the future menu bar app to open sessions | none |
-| `permission_mode` | no | Claude Code permission mode used by the future menu bar app to start sessions | none |
+| `terminal_app` | no | Terminal application used by the menu bar app to open sessions | none |
+| `permission_mode` | no | Claude Code permission mode used by the menu bar app to start sessions | none |
 | `max_commit_lines` | no | Review size threshold: added plus removed lines per commit | `999` |
 | `generated_globs` | no | Files excluded from the commit size count | `[]` |
 | `snapshot_globs` | no | Snapshot files excluded from the commit size count | `["**/__Snapshots__/**"]` |
-| `poll_minutes` | no | Polling interval in minutes, for the future menu bar app | `5` |
-| `ready_statuses` | no | Jira statuses meaning a ticket is ready to start, for the future menu bar app | `["To Start"]` |
+| `poll_minutes` | no | Polling interval in minutes, for the menu bar app | `5` |
+| `stuck_minutes` | no | Minutes after which a running step shows "Maybe stuck" in the menu bar app, by step name (`implement`, `verify`, ...) | built-in per-step thresholds |
+| `ready_statuses` | no | Jira statuses meaning a ticket is ready to start, for the menu bar app | `["To Start"]` |
 
 ## Replaying your CI review
 

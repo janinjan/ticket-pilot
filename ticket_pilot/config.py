@@ -126,6 +126,17 @@ def validate(cfg: dict) -> list[str]:
         if key in cfg and not isinstance(cfg[key], str):
             problems.append("%s must be a string" % key)
 
+    if "stuck_minutes" in cfg:
+        stuck = cfg["stuck_minutes"]
+        if not isinstance(stuck, dict):
+            problems.append("stuck_minutes must be an object of step name to minutes")
+        else:
+            for step_name, minutes in stuck.items():
+                if step_name not in runs.STEP_NAMES:
+                    problems.append("stuck_minutes: unknown step %r" % step_name)
+                elif isinstance(minutes, bool) or not isinstance(minutes, int) or minutes <= 0:
+                    problems.append("stuck_minutes.%s must be a positive integer" % step_name)
+
     lines = cfg.get("max_commit_lines")
     if isinstance(lines, bool) or not isinstance(lines, int) or lines <= 0:
         problems.append("max_commit_lines must be a positive integer")
