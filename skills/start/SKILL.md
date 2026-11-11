@@ -47,7 +47,7 @@ Each of these makes the run a failure, whatever the result:
 
 **The CLI.** When this skill loads you are told its base directory (`…/skills/start`). `<plugin-root>` is the directory two levels above it. Every `tp` call below is written `"<plugin-root>/bin/tp" …`: replace `<plugin-root>` with that absolute path. Do not rely on an environment variable to find it.
 
-**The config.** Read the config file with the Read tool: `$TICKET_PILOT_CONFIG` when set, else `~/.config/ticket-pilot/config.json`. In the steps below, "the repo entry" is the entry of `repos` chosen at start-up. Optional keys, used when present: on the repo entry `setup_command`, `sync_command`, `launch_skill`, `ci_review_prompt` (a path relative to the repo root); at the top level `sync_command`, `reviewer_agent`, `auditor_agent`, `backend.repos`, `backend.api_docs`, `max_commit_lines`.
+**The config.** Read the config file with the Read tool: `$TICKET_PILOT_CONFIG` when set, else `~/.config/ticket-pilot/config.json`. In the steps below, "the repo entry" is the entry of `repos` chosen at start-up. Optional keys, used when present: on the repo entry `setup_command`, `sync_command`, `launch_skill`, `ci_review_prompt` (a path relative to the repo root), `ci_review_command`; at the top level `sync_command`, `reviewer_agent`, `auditor_agent`, `backend.repos`, `backend.api_docs`, `max_commit_lines`.
 
 **The worktree.** Bash `cd` outside the session's working directory may not persist between calls. Every command for the worktree is either `cd "<worktree>" && …` in the same call or `git -C "<worktree>" …`. Every file edit uses an absolute path inside the worktree. Never edit the main checkout.
 
@@ -192,7 +192,9 @@ Make new files visible to the diff first: `git -C "<worktree>" add --intent-to-a
 1. **Reviewer** on the full diff: agent type `reviewer_agent` from the config, else `ticket-pilot:reviewer`. Give it:
    - the diff (paste it, or for a large one the exact read-only command that prints it, and say it is the whole change);
    - the worktree path;
-   - when the repo entry has `ci_review_prompt`: its absolute path (main repo root + the configured relative path). Passing this review locally is meant to leave the CI bot nothing to comment.
+   - when the repo entry has `ci_review_prompt`: its absolute path (main repo root + the configured relative path).
+
+   The reviewer only applies the CI prompt: it is not the CI review itself, which also builds its own context and output. The CI review is replayed in step 9, on each commit, when the repo entry has `ci_review_command`.
 2. Read its answer: line 1 `Score: …`, line 2 the reason. A reason starting with `INPUT MISSING:` is a failure to fix (give the missing input and rerun), never a pass. Every remark, whatever the score, comes as `path:line → problem`; a reason that mentions a remark without listing it is incomplete: ask the reviewer for the lines before going on.
 3. **Auditor**, with a fresh context: agent type `auditor_agent` from the config, else `ticket-pilot:auditor`. Give it ONLY the full diff, the numbered list of requests and the worktree path. No reasoning, no justification.
 4. Check each finding against the code. Fix what is confirmed, then rebuild and rerun the tests (step 6 checks), and rerun the agent that raised it until it no longer reports it. A finding you reject is listed in the report with the proof that it is wrong.
@@ -220,7 +222,20 @@ Run `"<plugin-root>/bin/tp" run-step <id> 9`.
 **Every commit is verified, one by one**, oldest first: build, tests, and the reviewer (step 8 inputs) on that commit's diff only (`git -C "<worktree>" show <sha>`). After every checkout, regenerate what git does not track (project files, generated code) with the repo entry's `setup_command`, or the generation step of the repo's build skill, before building: otherwise the build uses the files of another commit.
 
 - Score -1 or -2 → fix it **as a fixup into that commit**, then verify **the whole chain** again: every commit builds and passes its tests. The exact commands are in the reference.
-- Score 0 or more and a reason not starting with `INPUT MISSING:` → next commit.
+- **Without `ci_review_command`**, before the first commit is verified, look for the CI review yourself, once per run:
+  - search the repo's CI definitions (for example `.github/workflows/`, `.gitlab-ci.yml`, `Jenkinsfile`, or any other CI configuration directory of the repo) for a job that reviews changes automatically, typically with an AI model, and read it to its end: what it gives the model as context (diff, commit message, previous comments, checklist), the prompt, the output schema, the exact call and its limits (turns, budget), and the step that publishes the result;
+  - a job only **referenced** there (its name, defined in a shared CI configuration outside the repo) → look for its definition: a local checkout of that shared configuration among the user's repos, then the code review tool and the team chat (read-only search for the job name). If you find the repository, ask before cloning it, then clone it read-only next to the user's repos, never inside the worktree. Not found → tell the user where it is referenced (`path:line`) and ask whether they have its definition;
+  - a script of the job that states it also runs locally (its header or documentation says so) → use it as is, with the options that match the CI run, rather than rebuilding the command; still check that it does not publish anything;
+  - none found → carry on with the reviewer only; the report says so;
+  - found → build the command that replays it locally on one commit: the same context, prompt, schema and call, **without the publishing step** and without anything that writes to a shared system. Ask before running it, with `"<plugin-root>/bin/tp" run-wait <id> question "<in the user's language: the CI review job found (path:line of each part), the command that replays it without publishing, its cost per commit, and whether to save it as ci_review_command in the config + recommendation>"`, and wait for the answer;
+  - yes → use it as `ci_review_command` below for this run. Write it into the user's config file only if they said yes to that too; a script it needs goes next to the config file, never into the repo or the worktree;
+  - no → reviewer only, and the report says so.
+- **CI review replay**, when the repo entry has `ci_review_command` (or the user accepted the one found above), after the reviewer on the same commit:
+  - before its first run, read what the command runs (the script and what it calls). If it can post, comment or vote anywhere, do not run it: tell the user and carry on without it;
+  - run it with the commit checked out: `cd "<worktree>" && TP_REV=<sha> TP_BASE=<base> TP_WORKTREE="<worktree>" <ci_review_command>`;
+  - every comment it prints is a finding: check it against the code, fix a confirmed one as a fixup into that commit (then the whole chain again, as below), reject a wrong one with its proof in the report;
+  - a failure of the command (exit code, empty or unreadable output) is never a pass: report it with its output.
+- Score 0 or more, a reason not starting with `INPUT MISSING:`, and no confirmed CI comment left → next commit.
 - A reason starting with `INPUT MISSING:` → fix the input and re-run the reviewer; it is never a pass.
 
 ## Step 10 — Report
@@ -236,6 +251,7 @@ Write a short report in the user's language, every point with its proof:
 - **every commit** builds and passes its tests;
 - the **test plan** (format of step 7, no code references) with its results, then the **Coverage** list (case → request / diff branch `path:line`);
 - results: tests, snapshots, reviewer score, auditor findings;
+- the **CI review**: the comments of `ci_review_command` per commit and what became of each. When it was not replayed (no CI review job found, or the user said no), write it plainly: the CI review was not replayed, only the reviewer applied its prompt, so nothing proves the CI bot will have nothing to comment;
 - **decisions taken alone**, open to challenge;
 - every ❓ left.
 

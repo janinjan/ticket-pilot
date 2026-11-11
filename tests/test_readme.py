@@ -17,6 +17,13 @@ class ReadmeTests(unittest.TestCase):
         for title in ("What it does", "Install", "Configure", "Usage", "Safety"):
             self.assertIsNotNone(section(title), title)
 
+    def test_ci_review_replay_is_documented(self):
+        replay = section("Replaying your CI review")
+        self.assertIsNotNone(replay)
+        self.assertIn("ci_review_command", replay)
+        self.assertIn("never post, comment or vote anywhere", replay)
+        self.assertIn("$TP_REV", replay)
+
     def test_install_commands(self):
         install = section("Install")
         self.assertIn("claude plugin marketplace add", install)

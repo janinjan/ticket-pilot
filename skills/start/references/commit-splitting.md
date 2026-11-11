@@ -43,7 +43,7 @@ At the end, `git -C "<worktree>" status --porcelain` is empty and `git -C "<work
 Oldest first, for each commit `<sha>` of `git -C "<worktree>" log --reverse --format=%H <base>..HEAD`. A rebase rewrites every later commit, so recompute this list after each rebase and continue from the position you reached.
 
 1. Check it out in the worktree (`git -C "<worktree>" checkout --detach <sha>`), regenerate what git does not track (`setup_command` of the repo entry, or the generation step of the repo's build skill: project files, generated code), build, run the tests. Go back with `git -C "<worktree>" checkout <branch>` and regenerate again.
-2. Run the reviewer on `git -C "<worktree>" show <sha>` with the step 8 inputs.
+2. Run the reviewer on `git -C "<worktree>" show <sha>` with the step 8 inputs, then, when the repo entry has `ci_review_command`, replay the CI review on that commit as step 9 describes. A confirmed CI comment is fixed like a score of -1.
 3. Score 0 or more and a reason not starting with `INPUT MISSING:` → next commit. A reason starting with `INPUT MISSING:` → fix the input and re-run the reviewer; it is never a pass.
 4. Score -1 or -2 → fix it in that commit:
    1. on the branch, make the fix and stage it;

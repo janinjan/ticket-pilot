@@ -112,6 +112,7 @@ Paths accept `~`. Keys marked optional can be omitted.
 | `repos[].sync_command` | no | Overrides the top-level `sync_command` for this repo | top-level, else `git fetch origin` |
 | `repos[].launch_skill` | no | Skill used to build and launch the app in step 7 | repo's own launch skill |
 | `repos[].ci_review_prompt` | no | Path relative to the repo of the prompt your CI review bot uses; passed to the reviewer (must exist) | none |
+| `repos[].ci_review_command` | no | Command, run from the worktree, that replays your CI review bot locally on one commit (same context, prompt, output schema and call as the CI job) and prints its comments without posting them. Receives `TP_REV` (commit), `TP_BASE` (base commit) and `TP_WORKTREE`. Run once per commit in step 9: it may cost what one CI review costs | none: only the reviewer runs, and the report says the CI chain was not replayed |
 | `backend.repos` | no | Backend checkouts read in step 3 | `[]` |
 | `backend.api_docs` | no | API documentation paths read in step 3 | `[]` |
 | `sync_command` | no | Command that syncs a repo before a worktree is created | `git fetch origin` |
@@ -124,6 +125,37 @@ Paths accept `~`. Keys marked optional can be omitted.
 | `snapshot_globs` | no | Snapshot files excluded from the commit size count | `["**/__Snapshots__/**"]` |
 | `poll_minutes` | no | Polling interval in minutes, for the future menu bar app | `5` |
 | `ready_statuses` | no | Jira statuses meaning a ticket is ready to start, for the future menu bar app | `["To Start"]` |
+
+## Replaying your CI review
+
+If your CI runs an automatic review on each change (for example an AI review bot), ticket-pilot can replay it locally on each commit before you send anything, so that the bot has nothing left to comment.
+
+- **Without configuration**: in step 9, the skill looks for the review job in the repo's CI definitions, reads how it builds its context, its prompt, its output schema and its call, and proposes a command that replays it without the publishing step. It runs it only after your yes, and offers to save it as `ci_review_command`.
+- **Your own command**: set `repos[].ci_review_command`. Keep the script next to your config file (for example in `~/.config/ticket-pilot/`), not in the repo. It must:
+  1. build the same context as the CI job, for the commit `$TP_REV` against `$TP_BASE`;
+  2. call the same model with the same prompt, output schema and limits;
+  3. print the comments, one per line or as the CI's JSON output;
+  4. **never post, comment or vote anywhere**: drop the CI's publishing step;
+  5. exit with a non-zero code when the review could not run.
+
+Skeleton, to adapt to what your CI job does:
+
+```sh
+#!/bin/sh
+set -eu
+cd "$TP_WORKTREE"
+context=$(mktemp)
+trap 'rm -f "$context"' EXIT
+{
+  git log -1 --format=%B "$TP_REV"
+  git diff "$TP_BASE" "$TP_REV"
+} > "$context"                       # replace with your CI's own context script
+cat path/to/ci-review-prompt "$context" \
+  | claude --print --output-format json \
+      --json-schema "$(cat path/to/ci-review-schema.json)"
+```
+
+Each replay costs what one review of your CI costs, once per commit and per verification pass.
 
 ## Usage
 

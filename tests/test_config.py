@@ -159,7 +159,9 @@ class MalformedShapeTests(unittest.TestCase):
 
 class OptionalKeyTests(unittest.TestCase):
     STRING_KEYS = ("sync_command", "reviewer_agent", "auditor_agent", "terminal_app", "permission_mode")
-    REPO_STRING_KEYS = ("setup_command", "ci_review_prompt", "launch_skill", "sync_command")
+    REPO_STRING_KEYS = (
+        "setup_command", "ci_review_prompt", "ci_review_command", "launch_skill", "sync_command",
+    )
 
     def problems_for(self, data):
         with tempfile.TemporaryDirectory() as tmp:
@@ -205,7 +207,7 @@ class OptionalKeyTests(unittest.TestCase):
         repo_keys = set()
         for repo in data["repos"]:
             repo_keys.update(repo)
-        for key in ("setup_command", "ci_review_prompt", "launch_skill", "sync_command"):
+        for key in self.REPO_STRING_KEYS:
             self.assertIn(key, repo_keys)
 
 

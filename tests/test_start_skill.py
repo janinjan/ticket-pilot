@@ -306,6 +306,27 @@ class StartSkillTests(unittest.TestCase):
         self.assertIn("never write your own tooling to drive the app", section)
         self.assertIn("system permissions", section)
 
+    def test_ci_review_is_replayed_on_each_commit(self):
+        sections = step_sections(skill())
+        self.assertIn("it is not the CI review itself", sections[8])
+        step_nine = sections[9]
+        self.assertIn('TP_REV=<sha> TP_BASE=<base> TP_WORKTREE="<worktree>" <ci_review_command>', step_nine)
+        self.assertIn("If it can post, comment or vote anywhere, do not run it", step_nine)
+        self.assertIn("never a pass", step_nine)
+        self.assertIn("the CI review was not replayed", sections[10])
+        reference = read(os.path.join(SKILL_DIR, "references/commit-splitting.md"))
+        self.assertIn("replay the CI review on that commit", reference)
+
+    def test_ci_review_job_is_found_when_not_configured(self):
+        step_nine = step_sections(skill())[9]
+        self.assertIn("**Without `ci_review_command`**", step_nine)
+        self.assertIn("without the publishing step", step_nine)
+        self.assertRegex(step_nine, r'tp"? run-wait <id> question "<in the user\'s language: the CI review job found')
+        self.assertIn("never into the repo or the worktree", step_nine)
+        self.assertIn("a job only **referenced** there", step_nine)
+        self.assertIn("ask before cloning it", step_nine)
+        self.assertIn("also runs locally", step_nine)
+
     def test_commit_subject_is_never_generic(self):
         section = step_sections(skill())[9]
         self.assertIn("Never a generic word", section)

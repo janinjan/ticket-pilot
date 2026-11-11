@@ -18,7 +18,9 @@ DEFAULTS = {
 
 REVIEW_KINDS = ("gerrit", "github")
 
-REPO_STRING_KEYS = ("setup_command", "ci_review_prompt", "launch_skill", "sync_command")
+REPO_STRING_KEYS = (
+    "setup_command", "ci_review_prompt", "ci_review_command", "launch_skill", "sync_command",
+)
 TOP_STRING_KEYS = (
     "sync_command",
     "reviewer_agent",
