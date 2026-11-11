@@ -114,9 +114,12 @@ def start(key: str, repo: str, repo_path: str) -> dict:
 def set_step(run_identifier: str, step: int, name: str) -> dict:
     run = _require(run_identifier)
     now = _now()
-    if run["history"] and "ended_at" not in run["history"][-1]:
-        run["history"][-1]["ended_at"] = now
-    run["history"].append({"step": step, "started_at": now})
+    last = run["history"][-1] if run["history"] else None
+    still_open = last is not None and "ended_at" not in last
+    if not (still_open and run["step"] == step and last["step"] == step):
+        if still_open:
+            last["ended_at"] = now
+        run["history"].append({"step": step, "started_at": now})
     run["step"] = step
     run["step_name"] = name
     run["status"] = "running"

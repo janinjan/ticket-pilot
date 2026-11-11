@@ -66,6 +66,24 @@ class RunsTests(RunsTestCase):
         self.assertEqual(run["history"][1]["step"], 2)
         self.assertEqual(run["step_name"], "prepare")
 
+    def test_set_step_on_the_open_current_step_keeps_one_entry(self):
+        run = runs.start("ABC-1", "app", "/tmp/app")
+        started_at = run["history"][0]["started_at"]
+        runs.set_waiting(run["id"], "go", "Ready?")
+        run = runs.set_step(run["id"], 1, "understand")
+        self.assertEqual(run["history"], [{"step": 1, "started_at": started_at}])
+        self.assertEqual(run["status"], "running")
+        self.assertIsNone(run["waiting"])
+
+    def test_set_step_on_a_closed_current_step_opens_a_new_entry(self):
+        run = runs.start("ABC-1", "app", "/tmp/app")
+        run["history"][-1]["ended_at"] = run["history"][-1]["started_at"]
+        runs.save(run)
+        run = runs.set_step(run["id"], 1, "understand")
+        self.assertEqual(len(run["history"]), 2)
+        self.assertEqual(run["history"][1]["step"], 1)
+        self.assertNotIn("ended_at", run["history"][1])
+
     def test_waiting_then_step_clears_waiting(self):
         run = runs.start("ABC-1", "app", "/tmp/app")
         run = runs.set_waiting(run["id"], "go", "Ready?")
