@@ -159,24 +159,54 @@ def _apply(event: dict, run: dict) -> None:
     runs.save(run)
 
 
-def handle(event: dict) -> None:
+AUTONOMY_REMINDER = (
+    "ticket-pilot: before asking the user anything, look for the answer yourself "
+    "(the app you drive, the repo, the config, the tools such as the proxy CLI and the simulator; "
+    "retry tooling failures with tp run-shell or the repo's build skill). "
+    "Ask only for a decision that is the user's, an action visible to others, "
+    "or what you genuinely cannot obtain \u2014 and say what you tried."
+)
+
+
+def _reminder(run: dict) -> str | None:
+    if run.get("status") == "done":
+        return None
+    parts = []
+    language = run.get("language")
+    if isinstance(language, str) and language.strip():
+        parts.append(
+            "ticket-pilot: write every message to the user in the run's language (%s), "
+            "including summaries after tool or agent output; translate tool output, "
+            "never paste it in another language." % language.strip()
+        )
+    parts.append(AUTONOMY_REMINDER)
+    return json.dumps({"hookSpecificOutput": {
+        "hookEventName": "UserPromptSubmit",
+        "additionalContext": " ".join(parts),
+    }})
+
+
+def handle(event: dict) -> str | None:
+    """Apply a hook event. Returns the JSON to print on stdout, or None to stay silent."""
     if not isinstance(event, dict):
-        return
+        return None
     session_id = event.get("session_id")
     cwd = event.get("cwd")
     name = event.get("hook_event_name")
     if not isinstance(session_id, str) or not SAFE_SESSION_ID.match(session_id):
-        return
+        return None
     if not isinstance(cwd, str) or not cwd or not isinstance(name, str):
-        return
+        return None
     if name not in ("UserPromptSubmit", "Stop", "Notification", "SessionStart", "SessionEnd"):
-        return
+        return None
     if name == "SessionEnd":
         # Only a run already bound to this session; never bind a new one here.
         run = runs.find_by_session(session_id)
         if run is not None:
             _apply(event, run)
-        return
+        return None
     run = _resolve(name, event.get("prompt"), session_id, cwd)
-    if run is not None:
-        _apply(event, run)
+    if run is None:
+        return None
+    _apply(event, run)
+    return _reminder(run) if name == "UserPromptSubmit" else None

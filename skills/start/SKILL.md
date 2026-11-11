@@ -12,9 +12,10 @@ Session tracking only works when the skill is invoked as `/ticket-pilot:start <K
 
 This file is written in English, but **you write to the user only in the language decided at the start** (see below). Language rule, checked before every message:
 
-- Decide the user's language once, at the start: the language instructions of the user's own instructions (CLAUDE.md, memory) win; otherwise the language of the user's messages. Keep it for the whole run.
+- Decide the user's language once, at the start: the language instructions of the user's own instructions (CLAUDE.md, memory) win; otherwise the language of the user's messages. Record it right after the run exists: `"<plugin-root>/bin/tp" run-set <id> --language <code>` (`fr`, `en`, `pt-BR`…). On resume, read `language` in `run-show` and reuse it; do not decide again. Keep it for the whole run.
 - Every sentence the user sees is in that language and register (if the user says "tu", say "tu"): one-line progress narration between tool calls, questions, summaries, tables, the test plan and the final report. No English sentence, not even a short "Checking the build".
-- Agent and tool outputs often come back in English: translate what you show, never paste or echo their English.
+- Before EVERY message to the user, check that it is in the recorded language. This matters most for what is written right after a long tool or agent output: status summaries, errors and blockers. The drift happens there.
+- Agent and tool outputs often come back in another language (English): translate what you show, never paste or echo them.
 - Code, commands, file paths, identifiers and quoted error messages stay as they are.
 
 ## Absolute rule
@@ -51,9 +52,11 @@ Each of these makes the run a failure, whatever the result:
 
 **The user's memory for this repo.** Claude Code loads the user's memory only for the directory the session started in: a session started in the worktree or in another directory does not see the memory of the repo, and a loaded index is not a rule applied. So read it yourself, at start-up and on resume: the folder is `~/.claude/projects/<name>/memory/`, where `<name>` is the main repo root with every non-alphanumeric character replaced by `-` (for example `/home/a.b/dev/app` gives `-home-a-b-dev-app`). Read its `MEMORY.md` and every file it links about code, naming, vocabulary, tests or commits. No such folder → say so once and carry on. Go over these rules again before naming anything (the branch in step 2, every symbol in step 5, every commit subject in step 9) and before splitting the commits: a rule of the memory wins over a default of this skill, for example the order or the grouping of the split.
 
-**The worktree.** Bash `cd` outside the session's working directory may not persist between calls. Every command for the worktree is either `cd "<worktree>" && …` in the same call or `git -C "<worktree>" …`. Every file edit uses an absolute path inside the worktree. Never edit the main checkout. Every command run in the worktree (setup, build, tests, project generation, `ci_review_command`) is prefixed with the run's environment from the repo entry's `env`: `cd "<worktree>" && eval "$("<plugin-root>/bin/tp" run-env <id>)" && …` (it prints nothing when the entry has no `env`).
+**The worktree.** Bash `cd` outside the session's working directory may not persist between calls. Every command for the worktree is either `cd "<worktree>" && …` in the same call or `git -C "<worktree>" …`. Every file edit uses an absolute path inside the worktree. Never edit the main checkout. Every build, test, setup, generation or `ci_review_command` command in the worktree goes through `"<plugin-root>/bin/tp" run-shell <id> '<command string>'` (the whole command as ONE quoted string): it runs in the worktree, with the run's `env` from the repo entry, inside the user's login interactive shell (`$SHELL -l -i -c`), so the user's version managers and PATH are loaded; Claude's Bash tool alone does not load them (wrong Ruby or Node, failed generation). Its stdin is empty and its exit code is the command's. Plain `git` commands do not need it. `tp run-env <id>` (export lines) remains for the cases where you need the variables yourself.
 
-**Questions.** Ask only for decisions that change what gets built: a real divergence between sources, a real ambiguity, a conflict between the design and the ticket. One question at a time, always with your recommendation. Every question to the user (the go, a divergence, a branch reference, launching the app, any choice) is recorded first with `"<plugin-root>/bin/tp" run-wait <id> <kind> "<the question text, in the user's language>"`, the text of the question itself, never an empty text; the steps below repeat it where it applies. Then wait for the answer.
+**Autonomy.** Before asking the user anything, look for the answer yourself, wherever you have access: the app you drive (navigate it to find test data, for example browse "My ads" for an existing item to edit), the repo, the config, the tools (the proxy's CLI or export to list its active rules, the simulator, the repo's build skill). A tooling failure is not a question: retry with `"<plugin-root>/bin/tp" run-shell`, the repo's build skill or a regeneration first. Ask only for (a) a decision that belongs to the user (divergence, scope, product), (b) an action visible to others, (c) something you genuinely cannot obtain, and then say what you already tried.
+
+**Questions.** Following the autonomy rule above, ask only for decisions that change what gets built: a real divergence between sources, a real ambiguity, a conflict between the design and the ticket. One question at a time, always with your recommendation. Every question to the user (the go, a divergence, a branch reference, launching the app, any choice) is recorded first with `"<plugin-root>/bin/tp" run-wait <id> <kind> "<the question text, in the user's language>"`, the text of the question itself, never an empty text; the steps below repeat it where it applies. Then wait for the answer.
 
 **Proof.** Every claim you make, during the run and in the report, comes with its proof: `path:line`, the command and its output, or a link. If you cannot prove it, say so and mark it ❓.
 
@@ -89,6 +92,8 @@ Run `"<plugin-root>/bin/tp" run-step <id> 1`.
 
 ## Step 2 — Prepare
 
+Apply the autonomy rule: a missing path, tool or setup is found in the repo and the config, or retried with `tp run-shell` and the repo's build skill, before any question.
+
 Run `"<plugin-root>/bin/tp" run-step <id> 2`.
 
 1. Sync the main repo: run `sync_command` (repo entry first, then top level) from the main repo root. Without one: `git -C "<repo>" fetch origin`.
@@ -98,7 +103,7 @@ Run `"<plugin-root>/bin/tp" run-step <id> 2`.
    - If it belongs to something else, never touch it: propose another slug as a question, `"<plugin-root>/bin/tp" run-wait <id> question "<in the user's language: slug X is taken, use slug Y? + recommendation>"`, and wait for the answer.
 4. Note the base commit: `git -C "<worktree>" merge-base HEAD origin/<main_branch>`. It is `<base>` in every later step.
 5. Record it: `"<plugin-root>/bin/tp" run-set <id> --worktree "<worktree>" --branch <slug>`.
-6. Set up the worktree: `cd "<worktree>" && eval "$("<plugin-root>/bin/tp" run-env <id>)" && <setup_command>` (with the run's environment, like every command in the worktree), or the repo's own build skill when it handles project generation itself.
+6. Set up the worktree: `"<plugin-root>/bin/tp" run-shell <id> '<setup_command>'` (like every command in the worktree), or the repo's own build skill when it handles project generation itself.
 7. If any of this fails: stop, report what failed with its output. Do not improvise a workaround.
 
 ## Step 3 — Research
@@ -155,6 +160,8 @@ Run `"<plugin-root>/bin/tp" run-step <id> 5`.
 
 ## Step 6 — Verify
 
+Apply the autonomy rule: a build, test or generation failure is retried with `tp run-shell`, the repo's build skill or a regeneration before you report or ask anything.
+
 Run `"<plugin-root>/bin/tp" run-step <id> 6`.
 
 1. **Build** with the repo's build command or build skill.
@@ -173,12 +180,12 @@ Run `"<plugin-root>/bin/tp" run-step <id> 7`.
 
 This step is "not applicable" only when the change has no effect visible in the app, and the reason must cite the diff that shows it (for example "only `path:line` of the build scripts changes").
 
-For the whole step: once the app runs on a device, simulator or browser that the user launched (or said is ready), never install, reinstall, rebuild or relaunch it there without an explicit yes for that exact action. A short or ambiguous reply ("ok", "done") to a question that offered several actions means ready, not permission to act. When in doubt, ask again in one sentence.
+For the whole step, apply the autonomy rule: find test data yourself by navigating the app you drive (for example an existing ad to edit under "My ads") instead of asking. Once the app runs on a device, simulator or browser that the user launched (or said is ready), never install, reinstall, rebuild or relaunch it there without an explicit yes for that exact action. A short or ambiguous reply ("ok", "done") to a question that offered several actions means ready, not permission to act. When in doubt, ask again in one sentence.
 
 1. Try to build and launch the app (simulator, emulator or browser) with the repo entry's `launch_skill`, or the repo's own launch skill if it has one.
 2. If that fails, or if there is no such skill, do not tinker: never write your own tooling to drive the app, and never ask the user to grant system permissions (accessibility, screen recording…) to make one work. When nothing available can drive the app, give the user the numbered cases of the test plan to run, with what to look at, record the wait with `"<plugin-root>/bin/tp" run-wait <id> question "<in the user's language: the cases to run and what to report>"`, and fill the results from their answers and screenshots. Ask the user to launch the app, with the toggle state you need, and wait: `"<plugin-root>/bin/tp" run-wait <id> launch_app "<in the user's language: what to launch and with which toggle state>"`.
    - Toggles: never edit generated or shipped config files to flip a toggle. Ask the user to set it in the app's debug menu.
-3. **Proxy state**, before running the cases, when a debugging proxy is in use: list the proxy's active rules (rewrite, scripting, breakpoint, map rules). Report every rule that alters requests or responses; before disabling one, ask with `"<plugin-root>/bin/tp" run-wait <id> question "<in the user's language: may I disable rule X, which alters Y? + recommendation>"` and wait for the answer. Never leave a rule you enabled active. The test plan states that real (unaltered) traffic was used, or which rule altered it.
+3. **Proxy state**, before running the cases, when a debugging proxy is in use: list the proxy's active rules (rewrite, scripting, breakpoint, map rules) yourself, with the proxy's own CLI or export; never ask the user to confirm that no rule is active. Report every rule that alters requests or responses; ask only before disabling one, with with `"<plugin-root>/bin/tp" run-wait <id> question "<in the user's language: may I disable rule X, which alters Y? + recommendation>"` and wait for the answer. Never leave a rule you enabled active. The test plan states that real (unaltered) traffic was used, or which rule altered it.
 4. Once the app runs, drive it:
    - validation scenarios for each request;
    - edge cases;

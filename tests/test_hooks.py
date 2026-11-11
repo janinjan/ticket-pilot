@@ -341,7 +341,8 @@ class CliHookTests(HooksTestCase):
     def test_cli_hook_handles_event(self):
         runs.start("ABC-1", "app", self.repo)
         code, out, err = self.run_hook(json.dumps(self.start_prompt()))
-        self.assertEqual((code, out, err), (0, "", ""))
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn("before asking the user anything", json.loads(out)["hookSpecificOutput"]["additionalContext"])
         self.assertEqual(runs.load("ABC-1--app")["session_id"], "s1")
 
     def test_bin_tp_hook_is_silent_on_garbage(self):
@@ -353,6 +354,69 @@ class CliHookTests(HooksTestCase):
             env=dict(os.environ),
         )
         self.assertEqual((result.returncode, result.stdout, result.stderr), (0, b"", b""))
+
+
+class LanguageReminderTests(HooksTestCase):
+    LANGUAGE = (
+        "ticket-pilot: write every message to the user in the run's language (fr), "
+        "including summaries after tool or agent output; translate tool output, "
+        "never paste it in another language."
+    )
+    AUTONOMY = (
+        "ticket-pilot: before asking the user anything, look for the answer yourself "
+        "(the app you drive, the repo, the config, the tools such as the proxy CLI and the simulator; "
+        "retry tooling failures with tp run-shell or the repo's build skill). "
+        "Ask only for a decision that is the user's, an action visible to others, "
+        "or what you genuinely cannot obtain \u2014 and say what you tried."
+    )
+
+    def expected(self, text):
+        return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": text}}
+
+    def run_hook(self, payload):
+        out = io.StringIO()
+        with mock.patch.object(sys, "stdin", io.StringIO(payload)):
+            with contextlib.redirect_stdout(out):
+                code = cli.main(["hook"])
+        return code, out.getvalue()
+
+    def bind(self, language):
+        runs.start("ABC-1", "app", self.repo)
+        if language:
+            runs.update("ABC-1--app", language=language)
+        hooks.handle(self.start_prompt())
+
+    def test_bound_run_with_language_prints_exact_json(self):
+        self.bind("fr")
+        code, out = self.run_hook(json.dumps(self.event("UserPromptSubmit", prompt="continue")))
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out), self.expected(self.LANGUAGE + " " + self.AUTONOMY))
+
+    def test_run_without_language_only_has_the_autonomy_sentence(self):
+        self.bind(None)
+        code, out = self.run_hook(json.dumps(self.event("UserPromptSubmit", prompt="x")))
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out), self.expected(self.AUTONOMY))
+
+    def test_done_run_is_silent(self):
+        self.bind("fr")
+        runs.update("ABC-1--app", status="done")
+        self.assertEqual(self.run_hook(json.dumps(self.event("UserPromptSubmit", prompt="x"))), (0, ""))
+
+    def test_unbound_session_is_silent(self):
+        self.bind("fr")
+        payload = self.event("UserPromptSubmit", session="other", prompt="x")
+        self.assertEqual(self.run_hook(json.dumps(payload)), (0, ""))
+
+    def test_other_events_are_silent(self):
+        self.bind("fr")
+        for name in ("Stop", "Notification", "SessionStart", "SessionEnd"):
+            self.assertEqual(self.run_hook(json.dumps(self.event(name))), (0, ""), name)
+
+    def test_malformed_input_is_silent(self):
+        self.bind("fr")
+        for payload in ("not json", "", "[]", "null"):
+            self.assertEqual(self.run_hook(payload), (0, ""), payload)
 
 
 class HooksJsonTests(unittest.TestCase):

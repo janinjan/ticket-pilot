@@ -21,7 +21,7 @@ Running `/ticket-pilot:start <KEY>` walks through 10 mandatory steps:
 
 Progress is tracked per run in the ticket-pilot state directory, so a stopped run can be resumed.
 
-The plugin also ships a read-only `reviewer` agent, a read-only `auditor` agent, hooks that track which Claude Code session belongs to which run (and when it ends), and the `tp` command line tool.
+The plugin also ships a read-only `reviewer` agent, a read-only `auditor` agent, hooks that track which Claude Code session belongs to which run (and when it ends, and, for a run with a recorded language, remind Claude on each prompt of a run that is not done to look for answers itself before asking and, when a language is recorded, to keep writing in that language), and the `tp` command line tool.
 
 A macOS menu bar app that shows your runs and the questions waiting for you ships in this repository; see [Menu bar app](#menu-bar-app). Install the app; it offers to install or update the Claude Code plugin it carries.
 
@@ -174,7 +174,7 @@ Paths accept `~`. Keys marked optional can be omitted.
 | `repos[].review` | yes | `gerrit` or `github`: decides the command printed to send the branch | none |
 | `repos[].match` | no | `title_prefixes`, `labels`, `components`: how twin tickets of this platform are recognised | none |
 | `repos[].setup_command` | no | Command run in a new worktree and after each checkout of step 9 (project generation, generated code, dependencies) | repo's own build skill |
-| `repos[].env` | no | Object of environment variables applied to every command the skill runs in the worktree (build, tests, `setup_command`, `ci_review_command`), through `tp run-env`. Names match `[A-Za-z_][A-Za-z0-9_]*`, values are strings that may use `{worktree}` and `{repo}` (absolute paths of the run's worktree and of the main checkout) | none |
+| `repos[].env` | no | Object of environment variables applied to every command the skill runs in the worktree (build, tests, `setup_command`, `ci_review_command`), through `tp run-shell` (`tp run-env` prints them as export lines). Names match `[A-Za-z_][A-Za-z0-9_]*`, values are strings that may use `{worktree}` and `{repo}` (absolute paths of the run's worktree and of the main checkout) | none |
 | `repos[].sync_command` | no | Overrides the top-level `sync_command` for this repo | top-level, else `git fetch origin` |
 | `repos[].launch_skill` | no | Skill used to build and launch the app in step 7 | repo's own launch skill |
 | `repos[].ci_review_prompt` | no | Path relative to the repo of the prompt your CI review bot uses; passed to the reviewer (must exist) | none |
@@ -234,13 +234,14 @@ From inside one of the configured repositories, in Claude Code:
 /ticket-pilot:start <KEY>
 ```
 
-The skill reads the ticket, shows the numbered requests and asks for your go. Questions come one at a time, each with a recommendation. At the end you get a report and the command to send the branch; running it is up to you.
+The skill reads the ticket, shows the numbered requests and asks for your go. It looks for answers itself before asking (in the app it drives, the repo, the config and the tools, retrying tooling failures), so questions are rare: they come one at a time, each with a recommendation. At the end you get a report and the command to send the branch; running it is up to you.
 
 Useful `tp` commands (`TP_ROOT` is defined in Configure; with the alias, just `tp ...`):
 
 ```sh
 "$TP_ROOT/bin/tp" run-list                 # every run: id, status, step, worktree
 "$TP_ROOT/bin/tp" run-show <KEY>--<repo>   # state of a run
+"$TP_ROOT/bin/tp" run-shell <KEY>--<repo> '<cmd>'  # one command in the run's worktree, with its env, in your login shell
 "$TP_ROOT/bin/tp" commit-size --staged     # size of the staged change against the threshold
 ```
 

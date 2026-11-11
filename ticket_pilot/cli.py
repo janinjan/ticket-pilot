@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import subprocess
 import sys
 
 from ticket_pilot import commit_size, config, hooks, runs
@@ -74,18 +76,18 @@ def cmd_run_show(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_run_env(args: argparse.Namespace) -> int:
-    run = runs.load(args.run_id)
-    if run is None:
-        return _fail("unknown run: %s" % args.run_id)
+def _run_environment(run: dict) -> dict | None:
+    """The repo entry's `env` for a run, placeholders substituted; None when the config is unreadable."""
     try:
         cfg = config.load()
     except (OSError, ValueError) as error:
-        return _fail("config file is not readable JSON: %s" % error)
+        _fail("config file is not readable JSON: %s" % error)
+        return None
     repo = config.repo_by_name(cfg, run.get("repo", ""))
     env = repo.get("env") if repo else None
+    result = {}
     if not isinstance(env, dict):
-        return 0
+        return result
     worktree = run.get("worktree")
     for name, value in env.items():
         if not isinstance(value, str) or not re.fullmatch(config.ENV_NAME_PATTERN, str(name)):
@@ -94,9 +96,42 @@ def cmd_run_env(args: argparse.Namespace) -> int:
             print("%s skipped: the worktree is not recorded yet" % name, file=sys.stderr)
             continue
         value = value.replace("{repo}", run.get("repo_path") or "")
-        value = value.replace("{worktree}", worktree or "")
+        result[str(name)] = value.replace("{worktree}", worktree or "")
+    return result
+
+
+def cmd_run_env(args: argparse.Namespace) -> int:
+    run = runs.load(args.run_id)
+    if run is None:
+        return _fail("unknown run: %s" % args.run_id)
+    env = _run_environment(run)
+    if env is None:
+        return 2
+    for name, value in env.items():
         print("export %s='%s'" % (name, value.replace("'", "'\\''")))
     return 0
+
+
+def cmd_run_shell(args: argparse.Namespace) -> int:
+    run = runs.load(args.run_id)
+    if run is None:
+        return _fail("unknown run: %s" % args.run_id)
+    worktree = run.get("worktree")
+    if not worktree:
+        return _fail("the worktree of %s is not recorded yet (tp run-set %s --worktree)" % (args.run_id, args.run_id))
+    env = _run_environment(run)
+    if env is None:
+        return 2
+    shell = os.environ.get("SHELL") or "/bin/zsh"
+    try:
+        return subprocess.call(
+            [shell, "-l", "-i", "-c", args.command],
+            cwd=worktree,
+            env=dict(os.environ, **env),
+            stdin=subprocess.DEVNULL,
+        )
+    except OSError as error:
+        return _fail("cannot run %s in %s: %s" % (shell, worktree, error))
 
 
 def cmd_run_list(args: argparse.Namespace) -> int:
@@ -119,15 +154,22 @@ def cmd_run_set(args: argparse.Namespace) -> int:
         fields["requests"] = args.request
     if args.title is not None:
         fields["title"] = args.title
+    if args.language is not None:
+        if not re.fullmatch(runs.LANGUAGE_PATTERN, args.language):
+            return _fail("invalid language: %r (expected %s, for example fr or en-GB)" % (args.language, runs.LANGUAGE_PATTERN))
+        fields["language"] = args.language
     if not fields:
-        return _fail("run-set needs at least one of --worktree, --branch, --jira-line, --request, --title")
+        return _fail("run-set needs at least one of --worktree, --branch, --jira-line, --request, --title, --language")
     return _with_run(args, lambda: runs.update(args.run_id, **fields))
 
 
 def cmd_hook(args: argparse.Namespace) -> int:
-    # A hook must never disturb the Claude Code session: no output, exit 0.
+    # A hook must never disturb the Claude Code session: exit 0, and the only
+    # possible output is the language reminder JSON of a UserPromptSubmit.
     try:
-        hooks.handle(json.loads(sys.stdin.read()))
+        output = hooks.handle(json.loads(sys.stdin.read()))
+        if isinstance(output, str) and output:
+            sys.stdout.write(output + "\n")
     except Exception:
         pass
     return 0
@@ -185,6 +227,14 @@ def build_parser() -> argparse.ArgumentParser:
     env.add_argument("run_id")
     env.set_defaults(func=cmd_run_env)
 
+    shell = subparsers.add_parser(
+        "run-shell",
+        help="run one command string in the run's worktree, with the run's env, in the user's login shell",
+    )
+    shell.add_argument("run_id")
+    shell.add_argument("command", help="the whole command, as ONE quoted string")
+    shell.set_defaults(func=cmd_run_shell)
+
     listing = subparsers.add_parser("run-list", help="print one line per stored run")
     listing.set_defaults(func=cmd_run_list)
 
@@ -198,6 +248,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="one numbered request, in order; repeat it for each one (replaces the stored list)",
     )
     update.add_argument("--title", help="the ticket's title, shown by the menu bar app")
+    update.add_argument("--language", help="the language decided for the user, such as fr or en")
     update.set_defaults(func=cmd_run_set)
 
     size = subparsers.add_parser("commit-size", help="measure a commit against the review threshold")

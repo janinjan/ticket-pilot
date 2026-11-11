@@ -50,6 +50,7 @@ class RunsTests(RunsTestCase):
         self.assertIsNone(run["session_id"])
         self.assertEqual(run["requests"], [])
         self.assertIsNone(run["title"])
+        self.assertIsNone(run["language"])
         self.assertEqual(len(run["history"]), 1)
 
     def test_start_is_idempotent(self):
@@ -260,6 +261,22 @@ class RunsCliTests(RunsTestCase):
         self.assertEqual(code, 0)
         self.assertEqual(runs.load("ABC-1--app")["title"], "Show the distance to the shop")
 
+    def test_cli_set_language(self):
+        self.run_cli("run-start", "ABC-1", "app", "/tmp/app")
+        for value in ("fr", "en", "pt-BR", "fil"):
+            code, _, _ = self.run_cli("run-set", "ABC-1--app", "--language", value)
+            self.assertEqual(code, 0, value)
+            self.assertEqual(runs.load("ABC-1--app")["language"], value)
+
+    def test_cli_set_language_rejects_bad_codes(self):
+        self.run_cli("run-start", "ABC-1", "app", "/tmp/app")
+        self.run_cli("run-set", "ABC-1--app", "--language", "fr")
+        for value in ("French", "FR", "f", "fr_FR", "fr-fr", "", "fr; rm"):
+            code, _, err = self.run_cli("run-set", "ABC-1--app", "--language", value)
+            self.assertEqual(code, 2, value)
+            self.assertIn("invalid language", err)
+        self.assertEqual(runs.load("ABC-1--app")["language"], "fr")
+
     def test_cli_set_requires_a_flag(self):
         self.run_cli("run-start", "ABC-1", "app", "/tmp/app")
         code, _, _ = self.run_cli("run-set", "ABC-1--app")
@@ -312,6 +329,78 @@ class RunEnvTests(RunsTestCase):
         self.assertEqual(code, 0)
         self.assertEqual(out.splitlines(), ["export MAIN='/tmp/app'"])
         self.assertIn("ROOT", err)
+
+
+class RunShellTests(RunsTestCase):
+    write_config = RunEnvTests.write_config
+
+    def setUp(self):
+        super().setUp()
+        self.wt = os.path.join(self._tmp.name, "wt")
+        os.makedirs(self.wt)
+        self.wt = os.path.realpath(self.wt)
+        self.fake = os.path.join(self._tmp.name, "fakeshell")
+        with open(self.fake, "w") as handle:
+            handle.write(
+                "#!/bin/sh\n"
+                'echo "args:$*"\n'
+                'echo "cwd:$(pwd -P)"\n'
+                'echo "ROOT:$ROOT"\n'
+                'echo "stdin:$(cat | wc -c | tr -d " ")"\n'
+                'echo "to-stderr" >&2\n'
+                "exit ${FAKE_EXIT:-0}\n"
+            )
+        os.chmod(self.fake, 0o755)
+        saved = os.environ.get("SHELL")
+        os.environ["SHELL"] = self.fake
+        self.addCleanup(
+            lambda: os.environ.pop("SHELL", None) if saved is None else os.environ.__setitem__("SHELL", saved)
+        )
+
+    def shell(self, *argv):
+        # Child output goes to real file descriptors, so capture them rather than sys.stdout.
+        import subprocess
+        import sys
+
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        result = subprocess.run(
+            [sys.executable, "-c", "import sys; from ticket_pilot import cli; sys.exit(cli.main(sys.argv[1:]))", *argv],
+            cwd=root, capture_output=True, text=True, env=os.environ.copy(), input="should not be read",
+        )
+        return result.returncode, result.stdout, result.stderr
+
+    def test_runs_in_the_worktree_with_login_shell_flags_env_and_no_stdin(self):
+        self.write_config({"ROOT": "{worktree}"})
+        runs.start("ABC-1", "app", "/tmp/app")
+        runs.update("ABC-1--app", worktree=self.wt)
+        code, out, err = self.shell("run-shell", "ABC-1--app", "make build && make test")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(
+            out.splitlines(),
+            ["args:-l -i -c make build && make test", "cwd:" + self.wt, "ROOT:" + self.wt, "stdin:0"],
+        )
+        self.assertIn("to-stderr", err)
+
+    def test_propagates_the_exit_code(self):
+        self.write_config(None)
+        runs.start("ABC-1", "app", "/tmp/app")
+        runs.update("ABC-1--app", worktree=self.wt)
+        os.environ["FAKE_EXIT"] = "7"
+        self.addCleanup(os.environ.pop, "FAKE_EXIT", None)
+        self.assertEqual(self.shell("run-shell", "ABC-1--app", "x")[0], 7)
+
+    def test_unknown_run_exits_2(self):
+        self.write_config(None)
+        code, out, err = self.run_cli("run-shell", "NOPE--app", "x")
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("unknown run", err)
+
+    def test_worktree_not_recorded_exits_2(self):
+        self.write_config(None)
+        runs.start("ABC-1", "app", "/tmp/app")
+        code, out, err = self.run_cli("run-shell", "ABC-1--app", "x")
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("worktree", err)
 
 
 if __name__ == "__main__":

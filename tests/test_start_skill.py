@@ -236,13 +236,24 @@ class StartSkillTests(unittest.TestCase):
         plan = read(os.path.join(SKILL_DIR, "references", "test-plan-format.md"))
         self.assertIn("real (unaltered) traffic", plan)
 
+    def test_autonomy_rule_before_questions(self):
+        text = skill()
+        self.assertIn("**Autonomy.**", text)
+        self.assertLess(text.index("**Autonomy.**"), text.index("**Questions.**"))
+        for needle in ("the app you drive", "My ads", "run-shell", "genuinely cannot obtain", "what you already tried"):
+            self.assertIn(needle, text)
+        sections = step_sections(text)
+        for number in (2, 6, 7):
+            self.assertIn("autonomy rule", sections[number])
+        self.assertIn("never ask the user to confirm that no rule is active", sections[7])
+
     def test_user_language_and_register_everywhere(self):
         text = skill()
         head = text[:text.index("## Absolute rule")]
         self.assertIn("only in the language decided at the start", head)
         self.assertIn("language and register", head)
         self.assertIn("progress narration", head)
-        self.assertIn("never paste or echo their English", head)
+        self.assertIn("never paste or echo them", head)
         self.assertIn("CLAUDE.md, memory", head)
         self.assertIn("write the report in the user's language", step_sections(text)[3])
 
@@ -305,7 +316,7 @@ class StartSkillTests(unittest.TestCase):
         self.assertIn("regenerate what git does not track", step_sections(skill())[9])
         reference = read(os.path.join(SKILL_DIR, "references/commit-splitting.md"))
         self.assertIn("regenerate what git does not track", reference)
-        self.assertIn('--exec "<setup command> && ', reference)
+        self.assertIn("""--exec '"<plugin-root>/bin/tp" run-shell <id> "<setup> && """, reference)
 
     def test_app_test_never_builds_its_own_driving_tool(self):
         section = step_sections(skill())[7]
@@ -354,11 +365,23 @@ class StartSkillTests(unittest.TestCase):
         self.assertIn("Coverage", step_sections(text)[7])
         self.assertIn("Coverage", step_sections(text)[10])
 
-    def test_worktree_commands_apply_the_run_environment(self):
+    def test_worktree_commands_go_through_run_shell(self):
         text = skill()
-        self.assertIn('eval "$("<plugin-root>/bin/tp" run-env <id>)"', text)
-        self.assertIn("run-env", step_sections(text)[2])
-        self.assertIn("run-env", read(os.path.join(SKILL_DIR, "references/commit-splitting.md")))
+        self.assertIn('"<plugin-root>/bin/tp" run-shell <id>', text)
+        self.assertIn("run-shell", step_sections(text)[2])
+        self.assertNotIn('eval "$("<plugin-root>/bin/tp" run-env', text)
+        splitting = read(os.path.join(SKILL_DIR, "references/commit-splitting.md"))
+        self.assertIn("run-shell <id>", splitting)
+        self.assertIn("git rebase --exec", splitting)
+        self.assertNotIn('eval "$(', splitting)
+
+    def test_language_is_recorded_and_checked_before_every_message(self):
+        text = skill()
+        self.assertRegex(text, r'tp"? run-set <id> --language <code>')
+        self.assertIn("On resume, read `language`", text)
+        self.assertIn("Before EVERY message to the user", text)
+        for word in ("status summaries", "errors and blockers", "never paste or echo"):
+            self.assertIn(word, text)
 
 
 if __name__ == "__main__":

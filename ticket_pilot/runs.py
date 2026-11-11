@@ -28,6 +28,7 @@ INPUT_KIND = "input"
 
 KEY_PATTERN = r"[A-Z][A-Z0-9]+-\d+"
 REPO_PATTERN = r"[A-Za-z0-9._-]+"
+LANGUAGE_PATTERN = r"[a-z]{2,3}(-[A-Z]{2})?"
 
 
 def now() -> str:
@@ -104,6 +105,7 @@ def start(key: str, repo: str, repo_path: str) -> dict:
         "step_name": STEP_NAMES[0],
         "status": "running",
         "waiting": None,
+        "language": None,
         "jira_line": None,
         "requests": [],
         "history": [{"step": 1, "started_at": now}],
