@@ -43,12 +43,15 @@ public enum SessionCommand {
     }
 
     /// Claude Code keeps a conversation under the folder it STARTED in, and `--resume` only finds it from
-    /// there. In order: the `cwd` of the session's transcript; the worktree,
+    /// there. In order: the `cwd` the plugin recorded; the `cwd` of the session's transcript; the worktree,
     /// else the repo. Any error reading the transcript falls back.
     public static func resumeDirectory(
         for run: Run,
         projectsDirectory: URL = defaultProjectsDirectory()
     ) -> String {
+        if let cwd = run.session?.cwd, !cwd.isEmpty {
+            return cwd
+        }
         if let sessionID = run.sessionID,
            let cwd = transcriptDirectory(sessionID: sessionID, projectsDirectory: projectsDirectory) {
             return cwd

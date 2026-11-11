@@ -132,8 +132,10 @@ def _session(run: dict) -> dict:
 def _apply(event: dict, run: dict) -> None:
     name = event["hook_event_name"]
     session = _session(run)
+    session["cwd"] = event["cwd"]
     if name == "UserPromptSubmit":
         session["state"] = "running"
+        session.pop("ended_at", None)
         if run.get("status") != "done":
             run["status"] = "running"
             run["waiting"] = None
@@ -148,6 +150,10 @@ def _apply(event: dict, run: dict) -> None:
         session["notified_at"] = runs.now()
     elif name == "SessionStart":
         session["state"] = "running"
+        session.pop("ended_at", None)
+    elif name == "SessionEnd":
+        session["state"] = "ended"
+        session["ended_at"] = runs.now()
     else:
         return
     runs.save(run)
@@ -163,7 +169,13 @@ def handle(event: dict) -> None:
         return
     if not isinstance(cwd, str) or not cwd or not isinstance(name, str):
         return
-    if name not in ("UserPromptSubmit", "Stop", "Notification", "SessionStart"):
+    if name not in ("UserPromptSubmit", "Stop", "Notification", "SessionStart", "SessionEnd"):
+        return
+    if name == "SessionEnd":
+        # Only a run already bound to this session; never bind a new one here.
+        run = runs.find_by_session(session_id)
+        if run is not None:
+            _apply(event, run)
         return
     run = _resolve(name, event.get("prompt"), session_id, cwd)
     if run is not None:

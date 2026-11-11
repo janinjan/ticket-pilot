@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Builds the ticket-pilot menu bar app from this checkout and installs it as
-# ~/Applications/TicketPilot.app. Writes only there (plus app/.build in this checkout); needs no elevated rights.
+# /Applications/TicketPilot.app. Writes only there (plus app/.build in this checkout) and removes an old
+# ~/Applications/TicketPilot.app; needs no elevated rights.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
@@ -34,10 +35,13 @@ if [ -z "${HOME:-}" ]; then
   echo "HOME is not set." >&2
   exit 1
 fi
-destination="$HOME/Applications/TicketPilot.app"
-bundle="$HOME/Applications/.TicketPilot.app.new"
+destination="/Applications/TicketPilot.app"
+bundle="/Applications/.TicketPilot.app.new"
+if [ ! -w /Applications ]; then
+  echo "/Applications is not writable by this user. Make it writable and run this script again, or drag the app into /Applications by hand (build it with swift build -c release --package-path app)." >&2
+  exit 1
+fi
 trap 'rm -rf "$bundle"' EXIT
-mkdir -p "$HOME/Applications"
 rm -rf "$bundle"
 mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
 cp "$binary" "$bundle/Contents/MacOS/TicketPilot"
@@ -63,5 +67,7 @@ fi
 
 rm -rf "$destination"
 mv "$bundle" "$destination"
+# The old per-user copy, so that Spotlight and the login item find a single app.
+rm -rf "$HOME/Applications/TicketPilot.app"
 open "$destination"
 echo "Installed $destination (version $version)."

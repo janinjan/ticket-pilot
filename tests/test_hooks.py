@@ -59,7 +59,13 @@ class BindingTests(HooksTestCase):
         run = runs.load("ABC-1--app")
         self.assertEqual(run["session_id"], "s1")
         self.assertEqual(
-            run["session"], {"state": "running", "last_notification": None, "notified_at": None}
+            run["session"],
+            {
+                "state": "running",
+                "last_notification": None,
+                "notified_at": None,
+                "cwd": os.path.join(self.repo, "sub"),
+            },
         )
         self.assertFalse(self.pending_path().exists())
 
@@ -208,6 +214,15 @@ class BoundSessionTests(HooksTestCase):
         self.assertIn("since", run["waiting"])
         self.assertEqual(run["session"]["state"], "waiting")
 
+    def test_events_store_the_session_cwd(self):
+        sub = os.path.join(self.repo, "sub")
+        os.makedirs(sub, exist_ok=True)
+        self.assertEqual(runs.load("ABC-1--app")["session"]["cwd"], self.repo)
+        hooks.handle(self.event("Stop", cwd=sub))
+        self.assertEqual(runs.load("ABC-1--app")["session"]["cwd"], sub)
+        hooks.handle(self.event("SessionEnd", cwd=self.repo))
+        self.assertEqual(runs.load("ABC-1--app")["session"]["cwd"], self.repo)
+
     def test_stop_does_not_override_explicit_waiting(self):
         runs.set_waiting("ABC-1--app", "go", "plan ready")
         hooks.handle(self.event("Stop"))
@@ -249,6 +264,48 @@ class BoundSessionTests(HooksTestCase):
         run = runs.load("ABC-1--app")
         self.assertEqual(run["session"]["state"], "running")
         self.assertEqual(run["status"], "waiting")
+
+
+class SessionEndTests(HooksTestCase):
+    def setUp(self):
+        super().setUp()
+        runs.start("ABC-1", "app", self.repo)
+        hooks.handle(self.start_prompt())
+
+    def test_session_end_marks_session_ended(self):
+        hooks.handle(self.event("Stop"))
+        hooks.handle(self.event("SessionEnd", reason="other"))
+        run = runs.load("ABC-1--app")
+        self.assertEqual(run["session"]["state"], "ended")
+        self.assertRegex(run["session"]["ended_at"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+        self.assertEqual(run["status"], "waiting")
+        self.assertEqual(run["waiting"]["kind"], "input")
+
+    def test_session_end_for_unknown_session_is_ignored(self):
+        before = self.snapshot_state()
+        hooks.handle(self.event("SessionEnd", session="other"))
+        self.assertEqual(self.snapshot_state(), before)
+
+    def test_session_end_never_binds_a_pending_session(self):
+        hooks.handle(self.start_prompt(key="ABC-2", session="s2"))
+        self.assertTrue(self.pending_path("s2").exists())
+        hooks.handle(self.event("SessionEnd", session="s2"))
+        self.assertIsNone(runs.find_by_session("s2"))
+        self.assertTrue(self.pending_path("s2").exists())
+
+    def test_resume_brings_session_back_to_running(self):
+        hooks.handle(self.event("SessionEnd"))
+        hooks.handle(self.event("SessionStart", source="resume"))
+        session = runs.load("ABC-1--app")["session"]
+        self.assertEqual(session["state"], "running")
+        self.assertNotIn("ended_at", session)
+
+    def test_prompt_after_end_brings_session_back_to_running(self):
+        hooks.handle(self.event("SessionEnd"))
+        hooks.handle(self.event("UserPromptSubmit", prompt="continue"))
+        session = runs.load("ABC-1--app")["session"]
+        self.assertEqual(session["state"], "running")
+        self.assertNotIn("ended_at", session)
 
 
 class CliHookTests(HooksTestCase):
@@ -299,12 +356,13 @@ class CliHookTests(HooksTestCase):
 
 
 class HooksJsonTests(unittest.TestCase):
-    def test_hooks_json_lists_four_events(self):
+    def test_hooks_json_lists_five_events(self):
         with open(os.path.join(ROOT, "hooks", "hooks.json"), encoding="utf-8") as handle:
             data = json.load(handle)
         events = data["hooks"]
         self.assertEqual(
-            sorted(events), ["Notification", "SessionStart", "Stop", "UserPromptSubmit"]
+            sorted(events),
+            ["Notification", "SessionEnd", "SessionStart", "Stop", "UserPromptSubmit"],
         )
         for name, groups in events.items():
             self.assertEqual(

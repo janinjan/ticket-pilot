@@ -22,6 +22,7 @@ public protocol ProcessRunning: Sendable {
 /// that grace period, so the call always returns.
 public struct SystemProcessRunner: ProcessRunning {
     private static let grace: TimeInterval = 1
+    private static let drainLimit: TimeInterval = 10
 
     private let timeout: TimeInterval?
 
@@ -73,8 +74,9 @@ public struct SystemProcessRunner: ProcessRunning {
                     exited.wait()
                 }
             }
-            // Do not wait forever for grandchildren that inherited the pipes.
-            _ = readers.wait(timeout: .now() + Self.grace)
+            // After a clean exit the readers still have output to drain: give them time, bounded in case a
+            // grandchild holds the pipes. After a terminate or kill, only a short grace.
+            _ = readers.wait(timeout: .now() + (timedOut ? Self.grace : Self.drainLimit))
         } else {
             exited.wait()
             readers.wait()

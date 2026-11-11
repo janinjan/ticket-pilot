@@ -11,6 +11,9 @@
     ],
     "SessionStart": [
       {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/tp\" hook"}]}
+    ],
+    "SessionEnd": [
+      {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/tp\" hook"}]}
     ]
   }
 }

@@ -17,15 +17,26 @@ enum LoginItem {
     }
 
     /// Turns Open at login on once, on the first launch; the user may turn it off afterwards.
-    /// The marker is only written once the registration succeeded, so a failure is retried.
-    static func registerOnce(marker: URL) {
-        guard !FileManager.default.fileExists(atPath: marker.path) else { return }
+    /// The marker holds the bundle path the registration was made for, written only once it
+    /// succeeded, so a failure is retried. When the app runs from another path (it moved to
+    /// /Applications), an enabled registration is renewed so the login item follows the app.
+    static func registerOnce(marker: URL, bundlePath: String = Bundle.main.bundlePath) {
+        let recorded = (try? String(contentsOf: marker, encoding: .utf8)) ?? ""
+        let markerExists = FileManager.default.fileExists(atPath: marker.path)
+        guard !markerExists || recorded != bundlePath else { return }
         do {
-            try SMAppService.mainApp.register()
+            if markerExists {
+                if isEnabled {
+                    try? SMAppService.mainApp.unregister()
+                    try SMAppService.mainApp.register()
+                }
+            } else {
+                try SMAppService.mainApp.register()
+            }
             try FileManager.default.createDirectory(
                 at: marker.deletingLastPathComponent(), withIntermediateDirectories: true
             )
-            try Data().write(to: marker)
+            try Data(bundlePath.utf8).write(to: marker)
         } catch {
             return
         }

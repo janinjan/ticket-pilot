@@ -12,11 +12,32 @@ public struct Run: Decodable, Equatable, Sendable, Identifiable {
         public var state: String
         public var lastNotification: String?
         public var notifiedAt: Date?
+        public var endedAt: Date?
+        /// Where the session's last hook event ran (`cwd`), when the plugin recorded it.
+        public var cwd: String?
 
         private enum CodingKeys: String, CodingKey {
-            case state
+            case state, cwd
             case lastNotification = "last_notification"
             case notifiedAt = "notified_at"
+            case endedAt = "ended_at"
+        }
+
+        public init(state: String, lastNotification: String?, notifiedAt: Date?, endedAt: Date? = nil, cwd: String? = nil) {
+            self.state = state
+            self.lastNotification = lastNotification
+            self.notifiedAt = notifiedAt
+            self.endedAt = endedAt
+            self.cwd = cwd
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            state = try container.decode(String.self, forKey: .state)
+            lastNotification = (try? container.decodeIfPresent(String.self, forKey: .lastNotification)) ?? nil
+            notifiedAt = (try? container.decodeIfPresent(Date.self, forKey: .notifiedAt)) ?? nil
+            endedAt = (try? container.decodeIfPresent(Date.self, forKey: .endedAt)) ?? nil
+            cwd = (try? container.decodeIfPresent(String.self, forKey: .cwd)) ?? nil
         }
     }
 

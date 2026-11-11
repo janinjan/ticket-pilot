@@ -179,6 +179,19 @@ private struct TokenError: Error {}
         #expect(try check(missing, .jiraToken).detail == "No Jira token in the Keychain")
     }
 
+    @Test func test_needsTokenWhenMissingOrRefusedButNotWhenKeychainFailed() async throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.home) }
+        let missing = await (try makeDoctor(fixture, jira: nil, token: { throw KeychainError.notFound })).run()
+        let refusedByJira = await (try makeDoctor(fixture, jira: FakeJira(.unauthorized))).run()
+        let keychainFailed = await (try makeDoctor(fixture, jira: nil, token: { throw KeychainError.unexpected(-128) })).run()
+        let healthy = await (try makeDoctor(fixture)).run()
+        #expect(missing.needsToken)
+        #expect(refusedByJira.needsToken)
+        #expect(!keychainFailed.needsToken)
+        #expect(!healthy.needsToken)
+    }
+
     @Test func test_httpErrorPointsAtTheSite() async throws {
         let fixture = try makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.home) }

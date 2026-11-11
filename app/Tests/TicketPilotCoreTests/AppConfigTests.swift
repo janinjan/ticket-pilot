@@ -33,7 +33,7 @@ struct AppConfigTests {
         let config = try AppConfig.load(from: url)
         #expect(config.pollMinutes == 5)
         #expect(config.readyStatuses == ["To Start"])
-        #expect(config.terminalApp == "Terminal")
+        #expect(config.terminalApp == nil)
         #expect(config.permissionMode == nil)
         #expect(config.stuckMinutes == [:])
         #expect(config.repos[0].match.labels == [])

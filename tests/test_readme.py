@@ -57,7 +57,7 @@ class ReadmeTests(unittest.TestCase):
         self.assertIn("never launches `claude` without a click", app)
         self.assertIn("claude mcp list", app)
         self.assertIn("Open at login", app)
-        self.assertIn("~/Applications/TicketPilot.app", app)
+        self.assertIn("/Applications/TicketPilot.app", app)
         self.assertNotRegex(README, r"separate, later component")
 
     def test_installed_plugin_path_is_documented(self):

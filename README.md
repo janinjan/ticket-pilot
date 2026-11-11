@@ -21,7 +21,7 @@ Running `/ticket-pilot:start <KEY>` walks through 10 mandatory steps:
 
 Progress is tracked per run in the ticket-pilot state directory, so a stopped run can be resumed.
 
-The plugin also ships a read-only `reviewer` agent, a read-only `auditor` agent, hooks that track which Claude Code session belongs to which run, and the `tp` command line tool.
+The plugin also ships a read-only `reviewer` agent, a read-only `auditor` agent, hooks that track which Claude Code session belongs to which run (and when it ends), and the `tp` command line tool.
 
 A macOS menu bar app that shows your runs and the questions waiting for you ships in this repository; see [Menu bar app](#menu-bar-app).
 
@@ -35,9 +35,13 @@ Install it from the sources (needs Xcode, for `swift`):
 ./install.sh --from-source
 ```
 
-The script builds a universal binary, assembles `~/Applications/TicketPilot.app` with the version of `.claude-plugin/plugin.json`, signs it ad hoc, quits a running copy and opens the new one. Besides the build folder `app/.build` in the checkout, it writes only `~/Applications/TicketPilot.app` (creating `~/Applications` if needed) and never uses `sudo`. `swift build` warns that x86_64 is deprecated for the newest macOS target; the warning is expected and harmless. Installing from a release arrives with `/ticket-pilot:setup`.
+The script builds a universal binary, assembles `/Applications/TicketPilot.app` with the version of `.claude-plugin/plugin.json`, signs it ad hoc, quits a running copy and opens the new one. Besides the build folder `app/.build` in the checkout, it writes only `/Applications/TicketPilot.app` (it needs `/Applications` to be writable by you; otherwise it stops and tells you, or drag the app there by hand), removes the old copy at `~/Applications/TicketPilot.app` if there is one, and never uses `sudo`. `swift build` warns that x86_64 is deprecated for the newest macOS target; the warning is expected and harmless. Installing from a release arrives with `/ticket-pilot:setup`.
+
+If the Jira token is missing, open the health submenu and choose "Set Jira token…" to enter it from the menu: it is stored in the Keychain under the `jira.keychainService` of your config (account: your user name). The same alert has a "Create a token on Atlassian" button that opens the page where API tokens are made.
 
 The icon source is `app/Resources/AppIcon.svg`; `app/Resources/make-icon.sh` regenerates `app/Resources/AppIcon.icns` from it.
+
+Sessions open in the terminal you already use: `terminal_app` if set, otherwise the known terminal hosting a running `claude`, the only known terminal installed, or the app macOS opens `.command` files with (else Terminal); the menu's health submenu shows which one. "Open session" depends on the session: if it has ended (the plugin's `SessionEnd` hook records this) the app resumes it in a new terminal window, if the run has no session it starts one, and if the session is still running or waiting it brings your terminal to the front and shows "Session open in: <folder>" in the run's submenu so you can find the tab. "Resume" always reopens the session in a new window. With Ghostty 1.3 or later as your terminal (set as `terminal_app` or detected), "Open session" instead focuses the tab whose folder matches the session (using the folder the plugin's hooks last saw it in), or, when no tab matches, resumes the session in a new tab; the first time, macOS asks to let TicketPilot control Ghostty (System Settings › Privacy & Security › Automation), and without it the app falls back to the behaviour above. A session closed without the `SessionEnd` hook (a killed terminal, an older plugin) still shows as open: use "Resume".
 
 What it reads:
 
@@ -55,7 +59,7 @@ It only reads Jira: it never transitions a ticket, comments or edits a field. It
 
 Permissions: the first launch asks to allow notifications (System Settings > Notifications > TicketPilot). The app is signed ad hoc, so macOS may ask again to allow it to read the Jira token from the Keychain after each reinstall; choose Allow (or Always Allow), then "Check again". The app turns on "Open at login" the first time it starts; you can turn it off in its menu.
 
-Uninstall: uncheck "Open at login" in the menu, quit the app, then delete `~/Applications/TicketPilot.app`. Its state in `app/` can be deleted too; the runs are not affected.
+Uninstall: uncheck "Open at login" in the menu, quit the app, then delete `/Applications/TicketPilot.app` (and `~/Applications/TicketPilot.app` if an older install left one). Its state in `app/` can be deleted too; the runs are not affected.
 
 ## Install
 
@@ -150,7 +154,7 @@ Paths accept `~`. Keys marked optional can be omitted.
 | `sync_command` | no | Command that syncs a repo before a worktree is created | `git fetch origin` |
 | `reviewer_agent` | no | Agent type used as reviewer | `ticket-pilot:reviewer` |
 | `auditor_agent` | no | Agent type used as auditor | `ticket-pilot:auditor` |
-| `terminal_app` | no | Terminal application used by the menu bar app to open sessions | none |
+| `terminal_app` | no | Terminal application used by the menu bar app to open sessions | else the known terminal (Ghostty, iTerm, Warp, WezTerm, kitty) hosting a running `claude`, else the only one of them installed, else the app macOS opens `.command` files with, else Terminal |
 | `permission_mode` | no | Claude Code permission mode used by the menu bar app to start sessions | none |
 | `max_commit_lines` | no | Review size threshold: added plus removed lines per commit | `999` |
 | `generated_globs` | no | Files excluded from the commit size count | `[]` |

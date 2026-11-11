@@ -71,6 +71,12 @@ struct Notifier {
         post(content, identifier: identifier)
     }
 
+    func notifyCopied() {
+        let content = UNMutableNotificationContent()
+        content.title = "Copied to the clipboard"
+        post(content, identifier: "copied-\(UUID().uuidString)")
+    }
+
     private func post(_ content: UNNotificationContent, identifier: String) {
         center.add(UNNotificationRequest(identifier: identifier, content: content, trigger: nil))
     }

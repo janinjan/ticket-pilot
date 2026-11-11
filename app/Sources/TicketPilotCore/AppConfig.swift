@@ -67,7 +67,7 @@ public struct AppConfig: Decodable, Sendable {
     public var repos: [RepoConfig]
     public var pollMinutes: Int
     public var readyStatuses: [String]
-    public var terminalApp: String
+    public var terminalApp: String?
     public var permissionMode: String?
     public var stuckMinutes: [String: Int]
 
@@ -86,7 +86,7 @@ public struct AppConfig: Decodable, Sendable {
         repos = try container.decode([RepoConfig].self, forKey: .repos)
         pollMinutes = try container.decodeIfPresent(Int.self, forKey: .pollMinutes) ?? 5
         readyStatuses = try container.decodeIfPresent([String].self, forKey: .readyStatuses) ?? ["To Start"]
-        terminalApp = try container.decodeIfPresent(String.self, forKey: .terminalApp) ?? "Terminal"
+        terminalApp = try container.decodeIfPresent(String.self, forKey: .terminalApp)
         permissionMode = try container.decodeIfPresent(String.self, forKey: .permissionMode)
         stuckMinutes = try container.decodeIfPresent([String: Int].self, forKey: .stuckMinutes) ?? [:]
     }

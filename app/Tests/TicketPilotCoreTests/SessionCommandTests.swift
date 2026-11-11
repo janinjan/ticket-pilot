@@ -43,11 +43,11 @@ import Testing
         }
     }
 
-    private func run(sessionID: String?, worktree: String?) -> Run {
+    private func run(sessionID: String?, worktree: String?, cwd: String? = nil) -> Run {
         Run(
             id: "ABC-1--ios", key: "ABC-1", repo: "ios", repoPath: "/w/app", worktree: worktree,
             branch: nil, sessionID: sessionID,
-            session: nil, step: 3, stepName: "research", status: .waiting,
+            session: cwd.map { Run.SessionInfo(state: "waiting", lastNotification: nil, notifiedAt: nil, cwd: $0) }, step: 3, stepName: "research", status: .waiting,
             waiting: nil, history: [], updatedAt: Date(timeIntervalSince1970: 0)
         )
     }
@@ -90,11 +90,16 @@ import Testing
         return (root.appendingPathComponent("projects"), start.path)
     }
 
-    private func directory(_ fixture: (projects: URL, startFolder: String)) -> String {
+    private func directory(_ fixture: (projects: URL, startFolder: String), cwd: String? = nil) -> String {
         SessionCommand.resumeDirectory(
-            for: run(sessionID: "s-1", worktree: "/w/wt"),
+            for: run(sessionID: "s-1", worktree: "/w/wt", cwd: cwd),
             projectsDirectory: fixture.projects
         )
+    }
+
+    @Test func test_resumeDirectoryPrefersRecordedCwd() throws {
+        let f = try fixture { ["{\"cwd\":\"\($0)\"}"] }
+        #expect(directory(f, cwd: "/recorded") == "/recorded")
     }
 
     @Test func test_resumeDirectoryReadsCwdOnFirstLine() throws {

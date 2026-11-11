@@ -16,7 +16,7 @@ ICON_SCRIPT = RESOURCES / "make-icon.sh"
 
 
 class InstallScriptTests(unittest.TestCase):
-    """The script is never run here: it builds an app and installs it under ~/Applications."""
+    """The script is never run here: it builds an app and installs it under /Applications."""
 
     def setUp(self):
         self.text = SCRIPT.read_text()
@@ -36,7 +36,10 @@ class InstallScriptTests(unittest.TestCase):
         for expected in (
             "swift build -c release --package-path app --arch arm64 --arch x86_64",
             "codesign --force --sign -",
-            '"$HOME/Applications/TicketPilot.app"',
+            'destination="/Applications/TicketPilot.app"',
+            'bundle="/Applications/.TicketPilot.app.new"',
+            'rm -rf "$HOME/Applications/TicketPilot.app"',
+            "[ ! -w /Applications ]",
             "osascript -e 'quit app \"TicketPilot\"'",
         ):
             self.assertIn(expected, self.text)

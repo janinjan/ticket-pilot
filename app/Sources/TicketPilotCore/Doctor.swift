@@ -23,6 +23,9 @@ public struct HealthCheck: Equatable, Identifiable, Sendable {
     public var fix: String?
     public var blocksStart: Bool
     public var blockedRepos: [String]
+    /// True when only a new Jira token can fix this check (missing, or refused by Jira); false
+    /// when the Keychain itself refused access.
+    public var needsToken: Bool
 
     public init(
         id: Kind,
@@ -30,7 +33,8 @@ public struct HealthCheck: Equatable, Identifiable, Sendable {
         detail: String,
         fix: String? = nil,
         blocksStart: Bool = false,
-        blockedRepos: [String] = []
+        blockedRepos: [String] = [],
+        needsToken: Bool = false
     ) {
         self.id = id
         self.ok = ok
@@ -38,6 +42,7 @@ public struct HealthCheck: Equatable, Identifiable, Sendable {
         self.fix = fix
         self.blocksStart = blocksStart
         self.blockedRepos = blockedRepos
+        self.needsToken = needsToken
     }
 }
 
@@ -71,6 +76,11 @@ extension Array where Element == HealthCheck {
         if let configError { return "Config: \(configError)" }
         if isEmpty { return "Checking…" }
         return firstProblem.map { "\($0.id.title): \($0.detail)" } ?? "All good"
+    }
+
+    /// The Jira token must be entered: missing, or refused by Jira. Not when Keychain access failed.
+    public var needsToken: Bool {
+        contains { !$0.ok && $0.needsToken }
     }
 
     public var hasProblem: Bool {
@@ -196,7 +206,8 @@ public struct Doctor: Sendable {
                     ok: false,
                     detail: "No Jira token in the Keychain",
                     fix: #"security add-generic-password -s "\#(service)" -a "$USER" -w"#,
-                    blocksStart: true
+                    blocksStart: true,
+                    needsToken: true
                 )
             }
             return (missing, HealthCheck(id: .jiraReachable, ok: false, detail: "not checked: no Jira token"))
@@ -215,7 +226,8 @@ public struct Doctor: Sendable {
                     ok: false,
                     detail: "Jira refused the token",
                     fix: "Create a new API token and store it again in the Keychain service \"\(service)\"",
-                    blocksStart: true
+                    blocksStart: true,
+                    needsToken: true
                 ),
                 HealthCheck(id: .jiraReachable, ok: true, detail: config.jira.site.absoluteString)
             )

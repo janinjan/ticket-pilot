@@ -1,5 +1,6 @@
 import AppKit
 import Observation
+import UniformTypeIdentifiers
 import TicketPilotCore
 
 /// The app state shown in the menu, and every action the menu or a notification can trigger.
@@ -16,6 +17,10 @@ final class AppModel {
     private(set) var openAtLogin = false
     /// Disk usage of each run's worktree, by run id.
     private(set) var diskUsage: [String: Int64] = [:]
+    /// The check whose fix command was just copied: the menu shows "Copied ✓" for a few seconds.
+    private(set) var copiedFix: HealthCheck.Kind?
+    /// The terminal sessions open in, resolved at launch and on "Check again".
+    private(set) var terminalChoice = TerminalChoice(appName: "Terminal")
 
     /// `UNUserNotificationCenter` and `SMAppService` need a `.app` bundle.
     let hasBundle = Bundle.main.bundleIdentifier != nil
@@ -33,6 +38,9 @@ final class AppModel {
 
     @ObservationIgnored private let paths = StatePaths()
     @ObservationIgnored private let runner = SystemProcessRunner(timeout: 20)
+    @ObservationIgnored private var ghosttyAlertsShown: Set<String> = []
+    @ObservationIgnored private var ghosttyBusyRuns: Set<String> = []
+    @ObservationIgnored private let ghosttyRunner = SystemProcessRunner(timeout: 300)
     /// For `git worktree remove` and `du` on a big worktree, which must not be killed midway.
     /// Only used off the main actor.
     @ObservationIgnored private let untimedRunner = SystemProcessRunner()
@@ -48,7 +56,9 @@ final class AppModel {
     @ObservationIgnored private var acknowledged: Set<String> = []
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
     @ObservationIgnored private var clockTask: Task<Void, Never>?
+    @ObservationIgnored private var terminalTask: Task<Void, Never>?
     @ObservationIgnored private var doctorTask: Task<Void, Never>?
+    @ObservationIgnored private var copiedTask: Task<Void, Never>?
     /// The run version (`updatedAt`) each size was measured for, or is being measured for.
     @ObservationIgnored private var measuredAt: [String: Date] = [:]
 
@@ -125,10 +135,56 @@ final class AppModel {
         }
     }
 
+    /// The application macOS opens `.command` shell scripts with.
+    private nonisolated static func systemShellScriptApp() -> URL? {
+        if let type = UTType("com.apple.terminal.shell-script") {
+            return NSWorkspace.shared.urlForApplication(toOpen: type)
+        }
+        let probe = FileManager.default.temporaryDirectory.appendingPathComponent("tp-probe.command")
+        return NSWorkspace.shared.urlForApplication(toOpen: probe)
+    }
+
+    /// Looks for the terminal off the main actor (`ps` may be slow); the previous choice stays until the
+    /// new one arrives, and `afterTerminalResolved` holds back the actions that need it.
+    private func resolveTerminal(configured: String?) {
+        terminalTask?.cancel()
+        let task = Task { [weak self] in
+            let choice = await Task.detached { () -> TerminalChoice in
+                let detector = TerminalDetector(runner: SystemProcessRunner(timeout: 5))
+                return TerminalChoice.resolve(
+                    configured: configured,
+                    hostOfRunningClaude: detector.hostOfRunningClaude(),
+                    installedTerminals: detector.installedTerminals(),
+                    systemDefault: Self.systemShellScriptApp()
+                )
+            }.value
+            guard !Task.isCancelled, let self else { return }
+            terminalChoice = choice
+            terminalTask = nil
+        }
+        terminalTask = task
+    }
+
+    /// Runs `body` now, or once the terminal detection in flight has finished.
+    private func afterTerminalResolved(_ body: @escaping @MainActor () -> Void) {
+        guard terminalTask != nil else {
+            body()
+            return
+        }
+        Task { [weak self] in
+            while let task = self?.terminalTask {
+                await task.value
+                if self?.terminalTask == task { self?.terminalTask = nil }
+            }
+            body()
+        }
+    }
+
     private func loadConfig() {
         do {
             config = try AppConfig.load(from: paths.configFile)
             configError = nil
+            resolveTerminal(configured: config?.terminalApp)
         } catch {
             config = nil
             configError = switch error {
@@ -247,18 +303,20 @@ final class AppModel {
     func launch(_ choices: [RepoChoice], issue: JiraIssue) {
         picker.close()
         guard let config else { return }
-        for choice in choices where health.canStart(repo: choice.repo.name) {
-            if let runID = choice.existingRunID {
-                resume(runID: runID)
-                continue
-            }
-            do {
-                let command = try SessionCommand.start(
-                    key: issue.key, repoPath: choice.repo.expandedPath, permissionMode: config.permissionMode
-                )
-                terminal()?.open(command)
-            } catch {
-                Alerts.show(AlertText(title: "\(issue.key) cannot start", message: "\(error)"))
+        afterTerminalResolved { [self] in
+            for choice in choices where health.canStart(repo: choice.repo.name) {
+                if let runID = choice.existingRunID {
+                    resume(runID: runID)
+                    continue
+                }
+                do {
+                    let command = try SessionCommand.start(
+                        key: issue.key, repoPath: choice.repo.expandedPath, permissionMode: config.permissionMode
+                    )
+                    terminal()?.open(command)
+                } catch {
+                    Alerts.show(AlertText(title: "\(issue.key) cannot start", message: "\(error)"))
+                }
             }
         }
     }
@@ -278,14 +336,104 @@ final class AppModel {
 
     // MARK: - Run actions
 
-    /// Brings the terminal app to the front. The exact session window cannot be found reliably
-    /// across terminals: Resume reopens the right session.
+    /// Follows `SessionAction.forOpening`: reopen an ended session, start a missing one, or bring the
+    /// terminal to the front for a live one. With Ghostty, which is scriptable, the session's own tab is
+    /// focused instead, and a session with no tab is resumed in a new one.
     func openSession(runID: String) {
+        afterTerminalResolved { [self] in openSessionNow(runID: runID) }
+    }
+
+    private func openSessionNow(runID: String) {
         acknowledgeIfDone(runID)
-        terminal()?.activate()
+        guard let run = runs.first(where: { $0.id == runID }) else { return }
+        let action = SessionAction.forOpening(run)
+        if config != nil, terminalChoice.isGhostty {
+            openInGhostty(run, action: action)
+            return
+        }
+        switch action {
+        case .resume, .start:
+            resume(runID: runID)
+        case .bringToFront:
+            terminal()?.activate()
+        }
+    }
+
+    /// Focuses the run's Ghostty tab, else opens its session in a new tab. A session believed ended only
+    /// reuses a tab titled like Claude Code, never a plain shell. `findTab` is false for the explicit
+    /// "Resume" and for a run without session, which always open a new tab. A scripting failure is reported
+    /// once per kind; then a live session just brings Ghostty to the front and anything else goes through
+    /// the `.command` launcher.
+    private func openInGhostty(_ run: Run, action: SessionAction, findTab: Bool = true) {
+        guard !ghosttyBusyRuns.contains(run.id) else { return }
+        let command: String
+        do {
+            command = try SessionCommand.resume(run, permissionMode: config?.permissionMode)
+        } catch {
+            Alerts.show(AlertText(title: "\(run.key) cannot resume", message: "\(error)"))
+            return
+        }
+        // Long enough to answer the Automation prompt, finite so a hung osascript cannot block the run forever.
+        let controller = GhosttyController(runner: ghosttyRunner)
+        let folders = SessionLocator.candidateFolders(for: run)
+        let directory = run.worktree ?? run.repoPath
+        let runID = run.id
+        let live = action == .bringToFront
+        ghosttyBusyRuns.insert(run.id)
+        Task { [weak self] in
+            let failure = await Task.detached { () -> GhosttyError? in
+                do {
+                    if findTab, action != .start {
+                        let terminals = try controller.listTerminals()
+                        if let id = SessionLocator.pickTerminal(terminals, folders: folders, claudeOnly: !live) {
+                            try controller.focus(terminalID: id)
+                            return nil
+                        }
+                    }
+                    try controller.openTab(directory: directory, command: command)
+                    return nil
+                } catch let error as GhosttyError {
+                    return error
+                } catch {
+                    return .scriptFailed("\(error)")
+                }
+            }.value
+            guard let self else { return }
+            ghosttyBusyRuns.remove(runID)
+            guard let failure else { return }
+            if ghosttyAlertsShown.insert(failure.kind).inserted {
+                Alerts.show(failure.alertText)
+            }
+            if live {
+                terminal()?.activate()
+            } else {
+                resumeWithLauncher(runID: runID)
+            }
+        }
+    }
+
+    /// The disabled "Session open in: <folder>" line, shown while the run's session is live in a terminal tab.
+    func sessionFolderLine(runID: String) -> String? {
+        guard let run = runs.first(where: { $0.id == runID }), SessionAction.forOpening(run) == .bringToFront else {
+            return nil
+        }
+        return SessionAction.openInLine(run)
     }
 
     func resume(runID: String) {
+        afterTerminalResolved { [self] in resumeNow(runID: runID) }
+    }
+
+    private func resumeNow(runID: String) {
+        guard let run = runs.first(where: { $0.id == runID }) else { return }
+        if config != nil, terminalChoice.isGhostty {
+            openInGhostty(run, action: .resume, findTab: false)
+            return
+        }
+        resumeWithLauncher(runID: runID)
+    }
+
+    private func resumeWithLauncher(runID: String) {
         guard let run = runs.first(where: { $0.id == runID }) else { return }
         do {
             terminal()?.open(try SessionCommand.resume(run, permissionMode: config?.permissionMode))
@@ -327,9 +475,9 @@ final class AppModel {
     }
 
     private func terminal() -> Terminal? {
-        guard let config else { return nil }
+        guard config != nil else { return nil }
         return Terminal(launcher: TerminalLauncher(
-            appName: config.terminalApp,
+            appName: terminalChoice.appName,
             scriptsDirectory: paths.appDirectory.appendingPathComponent("scripts", isDirectory: true),
             runner: runner
         ))
@@ -347,9 +495,48 @@ final class AppModel {
         openAtLogin = LoginItem.isEnabled
     }
 
-    func copyToPasteboard(_ text: String) {
+    func copyFix(of check: HealthCheck) {
+        guard let fix = check.fix else { return }
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        NSPasteboard.general.setString(fix, forType: .string)
+        notifier?.notifyCopied()
+        copiedFix = check.id
+        copiedTask?.cancel()
+        copiedTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled else { return }
+            self?.copiedFix = nil
+        }
+    }
+
+    // MARK: - Jira token
+
+    /// Asks for the token, stores it in the Keychain and checks the setup again.
+    func setJiraToken() {
+        guard let config else { return }
+        guard let answer = Alerts.askJiraToken(site: config.jira.site.absoluteString, email: config.jira.email) else {
+            return
+        }
+        guard let token = answer.nonEmpty else {
+            Alerts.show(AlertText(title: "The token is empty", message: "Nothing was saved."))
+            return
+        }
+        let service = config.jira.keychainService
+        let account = NSUserName()
+        Task { [weak self] in
+            let result = await Task.detached {
+                Result<Void, KeychainError> { () throws(KeychainError) in
+                    try Keychain.setPassword(token, service: service, account: account)
+                }
+            }.value
+            switch result {
+            case .success:
+                self?.runDoctor()
+            case let .failure(error):
+                let detail = if case let .unexpected(status) = error { "Keychain status \(status)" } else { "\(error)" }
+                Alerts.show(AlertText(title: "The Jira token was not saved", message: detail))
+            }
+        }
     }
 
     private func handle(_ action: NotificationAction) {
@@ -364,8 +551,16 @@ final class AppModel {
     }
 }
 
+private extension String {
+    var nonEmpty: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
 private func freeBytesOnHomeVolume() -> Int64? {
     let values = try? FileManager.default.homeDirectoryForCurrentUser
         .resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
     return values?.volumeAvailableCapacityForImportantUsage
 }
+

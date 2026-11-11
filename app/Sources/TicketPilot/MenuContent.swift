@@ -48,6 +48,9 @@ struct MenuContent: View {
                 Text(registry)
                 Divider()
             }
+            if let folder = model.sessionFolderLine(runID: line.runID) {
+                Text(folder)
+            }
             Button("Open session") { model.openSession(runID: line.runID) }
             Button("Resume") { model.resume(runID: line.runID) }
             if model.releasable.contains(line.runID) {
@@ -64,12 +67,21 @@ struct MenuContent: View {
 
     private var healthMenu: some View {
         Menu(model.healthSummary) {
+            Text("Terminal: \(model.terminalChoice.appName)")
+            Divider()
             ForEach(model.health) { check in
-                Button {
-                    if let fix = check.fix { model.copyToPasteboard(fix) }
-                } label: {
-                    Label("\(check.id.title): \(check.detail)", systemImage: check.ok ? "checkmark.circle" : "xmark.circle")
-                    if let fix = check.fix { Text("Fix (click to copy): \(fix)") }
+                if check.id == .jiraToken, !check.ok, check.needsToken {
+                    Label("\(check.id.title): \(check.detail)", systemImage: "xmark.circle")
+                    Button("Set Jira token…", action: model.setJiraToken)
+                } else {
+                    Button {
+                        model.copyFix(of: check)
+                    } label: {
+                        Label("\(check.id.title): \(check.detail)", systemImage: check.ok ? "checkmark.circle" : "xmark.circle")
+                        if let fix = check.fix {
+                            Text(model.copiedFix == check.id ? "Copied ✓" : "Copy fix command: \(fix)")
+                        }
+                    }
                 }
             }
         }
