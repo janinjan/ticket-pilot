@@ -95,7 +95,7 @@ Run `"<plugin-root>/bin/tp" run-step <id> 2`.
 
 Run `"<plugin-root>/bin/tp" run-step <id> 3`.
 
-Launch **five read-only exploration agents in parallel**, in a single message (for example the `Explore` agent type), one per research item below. Give each one: the ticket key and title, the numbered requests, the worktree path, the relevant config entries, the absolute rule (nothing visible to others without an explicit yes: no comment, no vote, no Jira or wiki change, no message, nothing that changes a shared system), and the instruction to stay read-only and to return every finding with its proof (`path:line`, link, command).
+Launch **six read-only exploration agents in parallel**, in a single message (for example the `Explore` agent type), one per research item below. Give each one: the ticket key and title, the numbered requests, the worktree path, the relevant config entries, the absolute rule (nothing visible to others without an explicit yes: no comment, no vote, no Jira or wiki change, no message, nothing that changes a shared system), and the instruction to stay read-only and to return every finding with its proof (`path:line`, link, command).
 
 1. **Twin tickets** on the other platforms: search Jira for the ticket title without its platform prefix (the `match.title_prefixes` of every repo in the config). Read their descriptions: they often differ.
 2. **The other platforms' implementation, where it really is**. The agents run in parallel, so this agent finds the twin tickets itself (same search as item 1), then, depending on each twin's status:
@@ -105,8 +105,17 @@ Launch **five read-only exploration agents in parallel**, in a single message (f
 3. **Backend contract**: confirm every consumed field: exact name, type, nullability, computed by the backend or by the client. Sources: `backend.api_docs` and `backend.repos`. Never deduced from front-end code alone.
 4. **Precedents** in the target repo: an analogous feature already shipped; the git history ("how was it done for X?", who and when, with `git log` and `git blame`); how colleagues did the same thing.
 5. **The target module's architecture**: the module's own architectural choice is the reference, not only the neighbouring file. **When in doubt, look at the whole codebase.**
+6. **Local work in progress**: in the target repo and in the other platform repos, someone (often the user) may already have an unpushed local branch on this ticket. For each repo:
+   - list the local branches with their last commit date: `git -C "<repo>" for-each-ref refs/heads --sort=-committerdate --format='%(refname:short) %(committerdate:short) %(subject)'`;
+   - match the branch names of that list against the ticket key and the topic keywords;
+   - search the unmerged commits of every local branch by message, for the ticket key, the feature toggle name and the topic keywords: `git -C "<repo>" log --branches --not origin/<main_branch> --source -i --grep "<term>"` (`--source` prints the branch each commit was reached from);
+   - search each branch's own changes, never its whole content (a term already on the main branch would match every branch): `git -C "<repo>" log origin/<main_branch>..<branch> -i -G "<term>" --oneline` and `git -C "<repo>" diff origin/<main_branch>...<branch> | grep -i "<term>"`;
+   - a feature toggle that exists on the main branch but that nothing reads is a strong clue that the work exists elsewhere: look for the branch whose own changes read it.
+   A candidate branch is a local branch whose name matches, or whose own commits match by message (`-i --grep`) or by change (`-G`). Exclude the run's own branch (`<slug>`, created in step 2). Unmerged local work is reported as local, not as merged: merged code is only what item 2 reads from `origin/<main_branch>`.
 
 If an agent finds no implementation on a platform, rerun the sync for that repo yourself (its `sync_command`, else `git -C "<repo>" fetch origin`), then search `origin/<main_branch>` again before concluding "not started".
+
+If item 6 finds a candidate branch, record it and ask ONE question, with your recommendation: `"<plugin-root>/bin/tp" run-wait <id> question "Is branch <branch> (<repo>, last commit <date>) the reference for this ticket? Recommendation: <yes or no, and why>"`, then wait for the answer. If yes, that branch is the **primary reference**: compare against it in step 4 and reuse its logic and design rather than re-inventing them.
 
 ## Step 4 — Compare and decide
 
@@ -117,7 +126,7 @@ Run `"<plugin-root>/bin/tp" run-step <id> 4`.
    | Aspect | Web | iOS | Android | Back | → target |
    |---|---|---|---|---|---|
 
-   The platform columns are examples: use the platforms that exist for this ticket. Every cell carries its proof.
+   The platform columns are examples: use the platforms that exist for this ticket. When step 3 found a local work-in-progress branch, add a **Local branch** column for it (marked local, not merged); when the user chose it as the reference, it is the primary reference of the table. Every cell carries its proof.
 2. Ask **one question per real divergence** of behaviour, scope or data, with your recommendation, recorded first with `"<plugin-root>/bin/tp" run-wait <id> question "<divergence and recommendation>"`. Differences imposed by the platform itself do not count.
 3. Only one reference found → follow it, and say so.
 4. No reference at all (the target platform is the first) → **carry on**: build the spec from the ticket, the twins, the backend, the precedents and the design; take the decisions yourself and list them for the report; ask only on a real product ambiguity.

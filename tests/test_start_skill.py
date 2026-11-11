@@ -198,6 +198,25 @@ class StartSkillTests(unittest.TestCase):
         self.assertIsNone(re.search(r"\w/\w", example))
         self.assertIsNone(re.search(r":\d+", example))
 
+    def test_research_looks_for_local_work_in_progress(self):
+        section = step_sections(skill())[3]
+        self.assertIn("Local work in progress", section)
+        self.assertIn("for-each-ref refs/heads --sort=-committerdate", section)
+        self.assertIn('git -C "<repo>" log --branches --not origin/<main_branch> --source -i --grep', section)
+        self.assertIn('git -C "<repo>" log origin/<main_branch>..<branch> -i -G "<term>" --oneline', section)
+        self.assertIn('git -C "<repo>" diff origin/<main_branch>...<branch> | grep -i "<term>"', section)
+        self.assertNotIn('grep -l "<term>" <branch>', section)
+        self.assertIn("A candidate branch is", section)
+        self.assertIn("branch names", section)
+        self.assertIn("Exclude the run's own branch", section)
+        self.assertIn("nothing reads", section)
+        self.assertRegex(section, r'tp"? run-wait <id> question "Is branch')
+        self.assertIn("primary reference", section)
+        self.assertIn("not as merged", section)
+
+    def test_compare_table_has_a_local_branch_column(self):
+        self.assertIn("Local branch", step_sections(skill())[4])
+
     def test_report_has_a_coverage_list(self):
         text = skill()
         self.assertIn("Coverage", step_sections(text)[7])
