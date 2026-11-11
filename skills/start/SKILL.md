@@ -163,15 +163,19 @@ Run `"<plugin-root>/bin/tp" run-step <id> 7`.
 
 This step is "not applicable" only when the change has no effect visible in the app, and the reason must cite the diff that shows it (for example "only `path:line` of the build scripts changes").
 
+For the whole step: once the app runs on a device, simulator or browser that the user launched (or said is ready), never install, reinstall, rebuild or relaunch it there without an explicit yes for that exact action. A short or ambiguous reply ("ok", "done") to a question that offered several actions means ready, not permission to act. When in doubt, ask again in one sentence.
+
 1. Try to build and launch the app (simulator, emulator or browser) with the repo entry's `launch_skill`, or the repo's own launch skill if it has one.
 2. If that fails, do not tinker. Ask the user to launch the app, with the toggle state you need, and wait: `"<plugin-root>/bin/tp" run-wait <id> launch_app "<what to launch and with which toggle state>"`.
-3. Once the app runs, drive it:
+   - Toggles: never edit generated or shipped config files to flip a toggle. Ask the user to set it in the app's debug menu.
+3. **Proxy state**, before running the cases, when a debugging proxy is in use: list the proxy's active rules (rewrite, scripting, breakpoint, map rules). Report every rule that alters requests or responses; before disabling one, ask with `"<plugin-root>/bin/tp" run-wait <id> question "<in the user's language: may I disable rule X, which alters Y? + recommendation>"` and wait for the answer. Never leave a rule you enabled active. The test plan states that real (unaltered) traffic was used, or which rule altered it.
+4. Once the app runs, drive it:
    - validation scenarios for each request;
    - edge cases;
    - **toggle ON, then OFF** (non-regression);
    - network calls checked in the proxy when needed.
-4. Write the **test plan in QA format** and record each result ✅ / ❌ / ❓, following `references/test-plan-format.md`: prerequisites, numbered and titled cases (one per request, one per branch added in the diff, real data, "Proxy:" checks), complementary checks (toggle OFF identical to production, out-of-scope cases unchanged) and open questions. The plan has no code references (no file paths, `path:line`, code names or endpoint paths): it is written in plain functional language, with the case ↔ request link as "(Request N)".
-5. The plan and its results go into the final report, ready to be pasted as is into a Jira comment by the user. The traceability to the code goes in a separate **Coverage** list of the report: one line per case, case title → request number and/or diff branch (`path:line`).
+5. Write the **test plan in QA format** and record each result ✅ / ❌ / ❓, following `references/test-plan-format.md`: prerequisites, numbered and titled cases (one per request, one per branch added in the diff, real data, "Proxy:" checks), complementary checks (toggle OFF identical to production, out-of-scope cases unchanged) and open questions. The plan has no code references (no file paths, `path:line`, code names or endpoint paths): it is written in plain functional language, with the case ↔ request link as "(Request N)".
+6. The plan and its results go into the final report, ready to be pasted as is into a Jira comment by the user. The traceability to the code goes in a separate **Coverage** list of the report: one line per case, case title → request number and/or diff branch (`path:line`).
 
 ## Step 8 — Review and audit
 

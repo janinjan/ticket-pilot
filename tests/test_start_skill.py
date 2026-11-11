@@ -217,6 +217,22 @@ class StartSkillTests(unittest.TestCase):
     def test_compare_table_has_a_local_branch_column(self):
         self.assertIn("Local branch", step_sections(skill())[4])
 
+    def test_app_test_never_touches_a_user_launched_app(self):
+        section = step_sections(skill())[7].lower()
+        whole_step = section[:section.index("\n1. ")]
+        self.assertIn("never install, reinstall, rebuild or relaunch", whole_step)
+        self.assertIn("means ready, not permission", whole_step)
+        self.assertIn("debug menu", section)
+        self.assertIn("never edit generated or shipped config files", section)
+
+    def test_app_test_checks_the_proxy_rules(self):
+        section = step_sections(skill())[7]
+        self.assertIn("proxy's active rules", section)
+        self.assertRegex(section, r'tp"? run-wait <id> question "<in the user\'s language: [^"]*disabl')
+        self.assertIn("Never leave a rule you enabled active", section)
+        plan = read(os.path.join(SKILL_DIR, "references", "test-plan-format.md"))
+        self.assertIn("real (unaltered) traffic", plan)
+
     def test_report_has_a_coverage_list(self):
         text = skill()
         self.assertIn("Coverage", step_sections(text)[7])

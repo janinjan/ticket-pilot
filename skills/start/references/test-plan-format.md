@@ -8,7 +8,7 @@ The test plan uses a QA format: it can be pasted as is into a Jira comment by th
 
 ## Structure
 
-1. **Prerequisites**: the build to use, the toggle state (described by what it does), the proxy, the data sets (for example an eligible and a non-eligible postal code), the account or the starting screen.
+1. **Prerequisites**: the build to use, the toggle state (described by what it does), the proxy and whether real (unaltered) traffic was used or which proxy rule altered it, the data sets (for example an eligible and a non-eligible postal code), the account or the starting screen.
 2. **Numbered and titled cases**, `Case 1 – <title>`, each with:
    - the request it covers, as `(Request 2)`, when it covers one;
    - numbered steps;
@@ -39,7 +39,7 @@ The final report adds a **Coverage** list next to the plan, one line per case: c
 ```
 Prerequisites
 - Build: debug build of the branch, favourites feature ON (OFF for check A)
-- Proxy: running, filtering on the favourites calls
+- Proxy: running, filtering on the favourites calls, no active rule: real (unaltered) traffic
 - Account: test account with three items already visible in the catalogue, no favourite yet
 
 Case 1 – Adding a favourite (Request 1)
