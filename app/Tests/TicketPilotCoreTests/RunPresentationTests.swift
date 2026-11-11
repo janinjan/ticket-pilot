@@ -43,21 +43,29 @@ import Testing
         #expect(RunSection.of(Self.run(status: .running)) == .inProgress)
         #expect(RunSection.of(Self.run(status: .unknown)) == .inProgress)
         #expect(RunSection.of(Self.run(status: .done)) == .reportReady)
-        #expect(RunSection.allCases.map(\.title) == ["Needs you", "In progress", "Report ready"])
+        // Never readable as a Jira status.
+        #expect(RunSection.allCases.map(\.title) == ["Waiting for you", "TicketPilot is working on", "Ready for you"])
     }
 
-    @Test func test_stepLabelsAreHuman() {
+    @Test func test_stepLabelsSayWhatTheStepDoes() {
         let labels = [
-            "understand": "Understanding", "prepare": "Preparing", "research": "Researching",
-            "compare": "Comparing", "implement": "Coding", "verify": "Verifying",
-            "app_test": "Testing in the app", "review": "Reviewing", "commits": "Committing",
-            "report": "Writing the report",
+            "understand": "Understanding the ticket", "prepare": "Preparing the workspace",
+            "research": "Researching the other platforms", "compare": "Comparing and deciding",
+            "implement": "Coding", "verify": "Verifying (build, tests)", "app_test": "Testing in the app",
+            "review": "Reviewing the code", "commits": "Creating the commits", "report": "Writing the report",
         ]
         for (name, label) in labels {
             #expect(RunLine.stepLabel(name) == label)
         }
         #expect(RunLine.stepLabel("mystery") == "Mystery")
         #expect(RunLine.stepLabel("") == "")
+        // Each dot's tooltip, by step number, in the plugin's order.
+        #expect((1...10).map(RunLine.stepPhrase) == [
+            "Understanding the ticket", "Preparing the workspace", "Researching the other platforms",
+            "Comparing and deciding", "Coding", "Verifying (build, tests)", "Testing in the app",
+            "Reviewing the code", "Creating the commits", "Writing the report",
+        ])
+        #expect(RunLine.stepPhrase(11) == "Step 11")
     }
 
     @Test func test_inProgressLineShowsTheStepAndItsDuration() {
@@ -66,19 +74,22 @@ import Testing
         #expect(line.section == .inProgress)
         #expect(line.name == "ABC-1")
         #expect(line.title == "Show the distance")
-        #expect(line.context == "ABC-1 · iOS · In progress")
-        #expect(line.detail == "Verifying · 12 min")
+        // The small line gives the ticket's Jira status, never the run's own state.
+        #expect(line.context == "ABC-1 · iOS")
+        let withStatus = RunLine.make(Self.run(), now: Self.now, stuckMinutes: [:], summary: "Show the distance", jiraStatus: "In Review")
+        #expect(withStatus.context == "ABC-1 · iOS · In Review")
+        #expect(line.detail == "Step 6 of 10 · Verifying (build, tests) · 12 min")
 
         let long = RunLine.make(Self.run(startedMinutesAgo: 65), now: Self.now, stuckMinutes: ["verify": 90])
-        #expect(long.detail == "Verifying · 1 h 05")
+        #expect(long.detail == "Step 6 of 10 · Verifying (build, tests) · 1 h 05")
         #expect(long.title == "ABC-1")
 
         let fallback = RunLine.make(Self.run(startedMinutesAgo: nil), now: Self.now, stuckMinutes: [:])
-        #expect(fallback.detail == "Verifying · 0 min")
+        #expect(fallback.detail == "Step 6 of 10 · Verifying (build, tests) · 0 min")
 
         let stuck = RunLine.make(Self.run(stepName: "implement", step: 5, startedMinutesAgo: 121), now: Self.now, stuckMinutes: [:])
         // "Maybe stuck" is a tag of its own, not part of the text.
-        #expect(stuck.detail == "Coding · 2 h 01")
+        #expect(stuck.detail == "Step 5 of 10 · Coding · 2 h 01")
         #expect(stuck.isStuck)
     }
 
@@ -89,7 +100,8 @@ import Testing
         #expect(line.detail == "Waiting for your answer: Which layout?")
         // Without a title of its own, the key is the title and is not repeated below it.
         #expect(line.title == "ABC-1")
-        #expect(line.context == "iOS · Needs you")
+        #expect(line.context == "iOS")
+        #expect(RunLine.make(run, now: Self.now, stuckMinutes: [:], jiraStatus: "To Start").context == "iOS · To Start")
         #expect(line.section == .needsYou)
         run.waiting = Run.Waiting(kind: "go", text: "Summary, and the JIRA line?", since: Self.now)
         #expect(RunLine.make(run, now: Self.now, stuckMinutes: [:]).detail == "Summary, and the JIRA line?")
@@ -114,9 +126,9 @@ import Testing
         #expect(RunLine.make(run, now: Self.now, stuckMinutes: [:], commits: 1).detail == "1 commit ready for review")
         #expect(RunLine.make(run, now: Self.now, stuckMinutes: [:], commits: 4).detail == "4 commits ready for review")
         // A finished run gives no time: it no longer matters.
-        #expect(line.context == "iOS · Done")
-        let titled = RunLine.make(run, now: Self.now, stuckMinutes: [:], summary: "Show the distance")
-        #expect(titled.context == "ABC-1 · iOS · Done")
+        #expect(line.context == "iOS")
+        let titled = RunLine.make(run, now: Self.now, stuckMinutes: [:], summary: "Show the distance", jiraStatus: "Backlog")
+        #expect(titled.context == "ABC-1 · iOS · Backlog")
     }
 
     @Test func test_theSessionButtonSaysWhatTheRunNeeds() {
@@ -180,7 +192,10 @@ import Testing
         android.repo = "android"
         ios.updatedAt = Self.now
         android.updatedAt = Self.now.addingTimeInterval(-60)
-        let lines = RunGroup.make(runs: [ios, android], now: Self.now, stuckMinutes: [:], summaries: ["ABC-1": "Map"])[0].lines
+        let lines = RunGroup.make(
+            runs: [ios, android], now: Self.now, stuckMinutes: [:], summaries: ["ABC-1": "Map"], jiraStatuses: ["ABC-1": "To Start"]
+        )[0].lines
+        #expect(lines.map(\.context) == ["ABC-1 · iOS · To Start", "ABC-1 · Android · To Start"])
         #expect(lines.map(\.name) == ["ABC-1 · iOS", "ABC-1 · Android"])
         #expect(lines.map(\.title) == ["Map", "Map"])
     }
@@ -199,7 +214,7 @@ import Testing
     }
 
     @Test func test_progressReadsAsTheStepOutOfTenWithItsName() {
-        #expect(RunLine.make(Self.run(step: 6), now: Self.now, stuckMinutes: [:]).progressDescription == "Step 6 of 10, Verifying")
+        #expect(RunLine.make(Self.run(step: 6), now: Self.now, stuckMinutes: [:]).progressDescription == "Step 6 of 10, Verifying (build, tests)")
         #expect(RunLine.make(Self.run(status: .done), now: Self.now, stuckMinutes: [:]).progressDescription == nil)
     }
 

@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import TicketPilotCore
 
-@Suite struct SessionLocatorTests {
+@Suite(.timeLimit(.minutes(1))) struct SessionLocatorTests {
     private static func run(cwd: String?, worktree: String?, repoPath: String) -> Run {
         Run(
             id: "ABC-1--ios", key: "ABC-1", repo: "ios", repoPath: repoPath, worktree: worktree, branch: nil,
@@ -102,7 +102,7 @@ import Testing
     }
 }
 
-@Suite struct GhosttyControllerTests {
+@Suite(.timeLimit(.minutes(1))) struct GhosttyControllerTests {
     final class Runner: ProcessRunning, @unchecked Sendable {
         var result: ProcessResult
         var calls: [(String, [String])] = []
@@ -181,5 +181,59 @@ import Testing
 
     @Test func alertMentionsAutomationSettings() {
         #expect(GhosttyError.permissionDenied.alertText.message.contains("Automation"))
+    }
+
+    @Test func theTabTitledWithTheKeyWinsWhateverItsFolder() {
+        // A tab opened by Start reports the launcher's scripts folder: only its title names the run.
+        let terminals = [
+            TerminalSurface(id: "a", name: "◑ État d'avancement et problèmes", workingDirectory: "/Users/me/Developer"),
+            TerminalSurface(id: "b", name: "✳ ABC-3277 Jira ticket", workingDirectory: "/Users/me/Library/Application Support/ticket-pilot/app/scripts"),
+        ]
+        #expect(SessionLocator.pickTerminal(terminals, key: "ABC-3277", folders: ["/r"], claudeOnly: true) == "b")
+        #expect(SessionLocator.pickTerminal(terminals, key: "ABC-3277", folders: ["/r"]) == "b")
+    }
+
+    @Test func theKeyMustBeAWholeToken() {
+        let terminals = [
+            TerminalSurface(id: "a", name: "✳ ABC-32770 other", workingDirectory: "/x"),
+            TerminalSurface(id: "b", name: "✳ XABC-3277 other", workingDirectory: "/x"),
+            TerminalSurface(id: "c", name: "✳ abc-3277 lower case", workingDirectory: "/x"),
+        ]
+        #expect(SessionLocator.pickTerminal(terminals, key: "ABC-3277", folders: ["/r"]) == nil)
+        #expect(SessionLocator.pickTerminal([TerminalSurface(id: "d", name: "ABC-3277: Jira", workingDirectory: "/x")], key: "ABC-3277", folders: []) == "d")
+    }
+
+    @Test func amongKeyTitledTabsTheOneInTheRunsFolderThenAClaudeOneWins() {
+        let terminals = [
+            TerminalSurface(id: "a", name: "less ABC-1 notes", workingDirectory: "/x"),
+            TerminalSurface(id: "b", name: "✳ ABC-1 android", workingDirectory: "/android"),
+            TerminalSurface(id: "c", name: "✳ ABC-1 ios", workingDirectory: "/w"),
+        ]
+        #expect(SessionLocator.pickTerminal(terminals, key: "ABC-1", folders: ["/w", "/r"]) == "c")
+        #expect(SessionLocator.pickTerminal(terminals, key: "ABC-1", folders: ["/r"]) == "b")
+        // A plain shell naming the key is not the session when only a Claude Code tab will do.
+        #expect(SessionLocator.pickTerminal([terminals[0]], key: "ABC-1", folders: ["/r"], claudeOnly: true) == nil)
+    }
+
+    private static let tabs = [
+        TerminalSurface(id: "a", name: "◑ État d'avancement", workingDirectory: "/x"),
+        TerminalSurface(id: "b", name: "✳ ABC-1 ios", workingDirectory: "/y"),
+    ]
+
+    @Test func aMatchingTabIsFocusedWhateverTheSessionState() {
+        for action in [SessionAction.bringToFront, .resume] {
+            #expect(action.ghosttyOutcome(terminals: Self.tabs, key: "ABC-1", folders: ["/r"]) == .focus(terminalID: "b"))
+        }
+    }
+
+    @Test func aRunningSessionWithNoTabIsResumedInANewTab() {
+        #expect(SessionAction.bringToFront.ghosttyOutcome(terminals: Self.tabs, key: "ABC-2", folders: ["/r"]) == .openNewTab)
+        #expect(SessionAction.bringToFront.ghosttyOutcome(terminals: [], key: "ABC-2", folders: ["/r"]) == .openNewTab)
+        #expect(SessionAction.resume.ghosttyOutcome(terminals: Self.tabs, key: "ABC-2", folders: ["/r"]) == .openNewTab)
+    }
+
+    @Test func aLiveSessionIsNeverDuplicatedWhenTheTabListCannotBeRead() {
+        #expect(SessionAction.bringToFront.ghosttyOutcome(terminals: nil, key: "ABC-1", folders: []) == .bringGhosttyToFront)
+        #expect(SessionAction.resume.ghosttyOutcome(terminals: nil, key: "ABC-1", folders: []) == .openNewTab)
     }
 }

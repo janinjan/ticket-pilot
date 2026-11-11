@@ -179,6 +179,7 @@ struct PanelView: View {
     private func runCard(_ line: RunLine) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             VStack(alignment: .leading, spacing: 2) {
+                // The title takes the card's width (two lines at most): the buttons sit below the text.
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(line.title)
@@ -191,7 +192,6 @@ struct PanelView: View {
                         }
                     }
                     .accessibilityElement(children: .combine)
-                    sessionButton(line)
                     runMenu(line)
                 }
                 VStack(alignment: .leading, spacing: 2) {
@@ -210,7 +210,7 @@ struct PanelView: View {
             if let filled = line.filledSteps {
                 StepDots(filled: filled, total: RunLine.stepCount, description: line.progressDescription ?? "")
             }
-            secondaryRunButtons(line)
+            actionRow(line)
         }
         .padding(10)
         .background(Card.background, in: Card.shape)
@@ -218,36 +218,35 @@ struct PanelView: View {
         .accessibilityLabel(line.isStuck ? "\(line.name), maybe stuck" : line.name)
     }
 
-    /// "Review in <git client>" for a finished run, and "Release…", under the card's text; nothing when
-    /// neither applies.
-    @ViewBuilder
-    private func secondaryRunButtons(_ line: RunLine) -> some View {
+    /// Under the card's text: "Review in <git client>" for a finished run and "Release…" on the left, the
+    /// session button on the right.
+    private func actionRow(_ line: RunLine) -> some View {
         let gitClient = line.section == .reportReady && model.hasWorktree(runID: line.runID) ? model.gitClient : nil
         let releasable = model.releasable.contains(line.runID)
-        if gitClient != nil || releasable {
-            HStack(spacing: 6) {
-                if let gitClient {
-                    Button(action: closing { model.reviewInGitClient(runID: line.runID) }) {
-                        Text("Review in \(gitClient)")
-                            .lineLimit(1)
-                            .fixedSize()
-                    }
-                    .buttonStyle(.brandSecondary)
-                    .help("Opens the worktree in \(gitClient), to review its commits")
-                    .accessibilityLabel("Review \(line.name) in \(gitClient)")
+        return HStack(spacing: 6) {
+            if let gitClient {
+                Button(action: closing { model.reviewInGitClient(runID: line.runID) }) {
+                    Text("Review in \(gitClient)")
+                        .lineLimit(1)
+                        .fixedSize()
                 }
-                if releasable {
-                    Button(action: closing { model.release(runID: line.runID) }) {
-                        Text("Release…")
-                            .lineLimit(1)
-                            .fixedSize()
-                    }
-                    .buttonStyle(.brandSecondary)
-                    .accessibilityLabel("Release \(line.name)")
-                }
+                .buttonStyle(.brandSecondary)
+                .help("Opens the worktree in \(gitClient), to review its commits")
+                .accessibilityLabel("Review \(line.name) in \(gitClient)")
             }
-            .padding(.top, 2)
+            if releasable {
+                Button(action: closing { model.release(runID: line.runID) }) {
+                    Text("Release…")
+                        .lineLimit(1)
+                        .fixedSize()
+                }
+                .buttonStyle(.brandSecondary)
+                .accessibilityLabel("Release \(line.name)")
+            }
+            Spacer(minLength: 0)
+            sessionButton(line)
         }
+        .padding(.top, 2)
     }
 
     /// The card's "⋯": open the worktree in its editor, or show it in the Finder with its size.
@@ -429,22 +428,29 @@ private enum Card {
     static let background = Color.primary.opacity(0.06)
 }
 
-/// One dot per step of the plugin, filled up to the current one; one VoiceOver element.
+/// One dot per step of the plugin, filled up to the current one, each with its step as tooltip; one
+/// VoiceOver element whose value is "Step N of 10, <phrase>".
 private struct StepDots: View {
     let filled: Int
     let total: Int
     let description: String
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 0) {
             ForEach(0..<total, id: \.self) { index in
-                if index < filled {
-                    Circle().fill(Brand.orange)
-                        .frame(width: 6, height: 6)
-                } else {
-                    Circle().strokeBorder(.secondary, lineWidth: 1)
-                        .frame(width: 6, height: 6)
+                Group {
+                    if index < filled {
+                        Circle().fill(Brand.orange)
+                    } else {
+                        Circle().strokeBorder(.secondary, lineWidth: 1)
+                    }
                 }
+                .frame(width: 6, height: 6)
+                // A larger area under the pointer, for the tooltip.
+                .padding(.horizontal, 2)
+                .padding(.vertical, 3)
+                .contentShape(Rectangle())
+                .help("Step \(index + 1): \(RunLine.stepPhrase(index + 1))")
             }
         }
         .accessibilityElement()

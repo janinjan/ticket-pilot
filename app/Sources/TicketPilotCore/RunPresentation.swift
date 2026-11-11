@@ -36,9 +36,9 @@ public enum RunSection: CaseIterable, Equatable, Sendable {
 
     public var title: String {
         switch self {
-        case .needsYou: "Needs you"
-        case .inProgress: "In progress"
-        case .reportReady: "Report ready"
+        case .needsYou: "Waiting for you"
+        case .inProgress: "TicketPilot is working on"
+        case .reportReady: "Ready for you"
         }
     }
 }
@@ -55,7 +55,8 @@ public struct RunLine: Equatable, Sendable {
     public var name: String
     /// The ticket's title (`RunTitle.of`).
     public var title: String
-    /// "KEY · iOS · Needs you" / "In progress" / "Done"; without the key when it is already the title.
+    /// "KEY · iOS · <Jira status>": the ticket's status in Jira, never the run's own state (which is in
+    /// `detail`); without the status while unknown, without the key when it is already the title.
     public var context: String
     /// "Waiting for your answer: <question>", "Verifying · 12 min", "3 commits ready for review".
     /// "Maybe stuck" is `isStuck`.
@@ -75,27 +76,23 @@ public struct RunLine: Equatable, Sendable {
 
     /// `showsRepo` names the repo after the key, for a ticket with runs in several repos. `summary` is the
     /// ticket's summary in Jira, used when the run has no title of its own. `commits`: how many the finished
-    /// run made (`CommitCounter`), nil while unknown.
+    /// run made (`CommitCounter`), nil while unknown. `jiraStatus`: the ticket's status name in Jira.
     public static func make(
         _ run: Run, now: Date, stuckMinutes: [String: Int], showsRepo: Bool = false, summary: String? = nil,
-        commits: Int? = nil
+        commits: Int? = nil, jiraStatus: String? = nil
     ) -> RunLine {
         let stepStart = run.history.last?.startedAt ?? run.updatedAt
         let stepMinutes = minutes(from: stepStart, to: now)
         let threshold = stuckMinutes[run.stepName] ?? StuckThresholds.defaults[run.stepName]
         let isStuck = run.status == .running && threshold.map { stepMinutes > $0 } == true
         let section = RunSection.of(run)
-        let state: String
         let detail: String
         switch section {
         case .needsYou:
-            state = "Needs you"
             detail = waitingSentence(run.waiting)
         case .inProgress:
-            state = "In progress"
-            detail = stepLabel(run.stepName) + " · " + duration(stepMinutes)
+            detail = "Step \(run.step) of \(stepCount) · " + stepLabel(run.stepName) + " · " + duration(stepMinutes)
         case .reportReady:
-            state = "Done"
             detail = switch commits {
             case nil: "Ready for review"
             case 1?: "1 commit ready for review"
@@ -105,7 +102,9 @@ public struct RunLine: Equatable, Sendable {
         let repo = RepoName.display(run.repo)
         let title = RunTitle.of(run, summaries: summary.map { [run.key: $0] } ?? [:])
         // A run with no title shows its key as the title: it is not repeated below.
-        let context = (title == run.key ? [repo, state] : [run.key, repo, state]).joined(separator: " · ")
+        let status = jiraStatus.flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }
+        let context = ((title == run.key ? [] : [run.key]) + [repo] + (status.map { [$0] } ?? []))
+            .joined(separator: " · ")
         return RunLine(
             runID: run.id,
             section: section,
@@ -129,21 +128,32 @@ public struct RunLine: Equatable, Sendable {
         return waiting.kind == "question" ? "Waiting for your answer: \(waiting.text)" : waiting.text
     }
 
+    /// The plugin's steps, in order (`STEP_NAMES` in `ticket_pilot/runs.py`).
+    public static let stepNames = [
+        "understand", "prepare", "research", "compare", "implement", "verify", "app_test", "review", "commits",
+        "report",
+    ]
+
     /// What the plugin's step is doing, in plain words; an unknown step reads as its name, capitalized.
     public static func stepLabel(_ stepName: String) -> String {
         switch stepName {
-        case "understand": "Understanding"
-        case "prepare": "Preparing"
-        case "research": "Researching"
-        case "compare": "Comparing"
+        case "understand": "Understanding the ticket"
+        case "prepare": "Preparing the workspace"
+        case "research": "Researching the other platforms"
+        case "compare": "Comparing and deciding"
         case "implement": "Coding"
-        case "verify": "Verifying"
+        case "verify": "Verifying (build, tests)"
         case "app_test": "Testing in the app"
-        case "review": "Reviewing"
-        case "commits": "Committing"
+        case "review": "Reviewing the code"
+        case "commits": "Creating the commits"
         case "report": "Writing the report"
         default: stepName.prefix(1).uppercased() + stepName.dropFirst()
         }
+    }
+
+    /// The phrase of step `number` (1 to 10), each progress dot's tooltip.
+    public static func stepPhrase(_ number: Int) -> String {
+        stepNames.indices.contains(number - 1) ? stepLabel(stepNames[number - 1]) : "Step \(number)"
     }
 
     /// "Show in Finder · <size>", the size left out while unknown; nil without a worktree.
@@ -175,10 +185,10 @@ public struct RunGroup: Equatable, Sendable {
 
     /// The non-empty sections, in the panel order.
     /// `summaries`: the Jira summary of each ticket, by key, for the runs without a title of their own;
-    /// `commits`: the commits of each finished run, by run id.
+    /// `commits`: the commits of each finished run, by run id; `jiraStatuses`: each ticket's Jira status, by key.
     public static func make(
         runs: [Run], now: Date, stuckMinutes: [String: Int], summaries: [String: String] = [:],
-        commits: [String: Int] = [:]
+        commits: [String: Int] = [:], jiraStatuses: [String: String] = [:]
     ) -> [RunGroup] {
         let runsPerKey = Dictionary(grouping: runs, by: \.key).mapValues(\.count)
         let ordered = runs.sorted { ($0.updatedAt, $1.id) > ($1.updatedAt, $0.id) }
@@ -187,7 +197,7 @@ public struct RunGroup: Equatable, Sendable {
                 RunLine.make(
                     $0, now: now, stuckMinutes: stuckMinutes,
                     showsRepo: runsPerKey[$0.key, default: 0] > 1, summary: summaries[$0.key],
-                    commits: commits[$0.id]
+                    commits: commits[$0.id], jiraStatus: jiraStatuses[$0.key]
                 )
             }
             return lines.isEmpty ? nil : RunGroup(section: section, lines: lines)

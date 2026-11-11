@@ -351,7 +351,7 @@ final class AppModel {
             self.issues = issues
             summaries = Dictionary(issues.map { ($0.key, $0.summary) }, uniquingKeysWith: { first, _ in first })
             updatePresentation()
-            todo = TodoList(issues: issues, readyStatuses: config?.readyStatuses ?? [])
+            rebuildTodo()
             newTickets.forEach { notifier?.notifyNewTicket($0) }
             await refreshReleasable(jira)
         }
@@ -377,8 +377,16 @@ final class AppModel {
         }
     }
 
+    /// The tickets to do, without those that already have a run not done.
+    private func rebuildTodo() {
+        todo = TodoList(
+            issues: issues, readyStatuses: config?.readyStatuses ?? [], keysWithRuns: TodoList.keysWithRuns(runs)
+        )
+    }
+
     private func refreshRuns() {
         runs = RunStore(directory: paths.runsDirectory).loadAll()
+        rebuildTodo()
         for event in needsYou.events(for: runs) {
             notifier?.notify(event, identifier: event.notificationID(in: runs))
         }
@@ -394,7 +402,8 @@ final class AppModel {
         let now = Date()
         let stuckMinutes = config?.stuckMinutes ?? [:]
         runGroups = RunGroup.make(
-            runs: runs, now: now, stuckMinutes: stuckMinutes, summaries: summaries, commits: commitCounts
+            runs: runs, now: now, stuckMinutes: stuckMinutes, summaries: summaries, commits: commitCounts,
+            jiraStatuses: Dictionary(issues.map { ($0.key, $0.statusName) }, uniquingKeysWith: { first, _ in first })
         )
         sleepGuard.update(anyRunning: SleepPolicy.keepsMacAwake(runs: runs, now: now, stuckMinutes: stuckMinutes))
     }
@@ -548,11 +557,38 @@ final class AppModel {
                     let command = try SessionCommand.start(
                         key: issue.key, repoPath: choice.repo.expandedPath, permissionMode: config.permissionMode
                     )
-                    terminal()?.open(command)
+                    if terminalChoice.isGhostty {
+                        startInGhostty(command, directory: choice.repo.expandedPath)
+                    } else {
+                        terminal()?.open(command)
+                    }
                 } catch {
                     Alerts.show(AlertText(title: "\(issue.key) cannot start", message: "\(error)"))
                 }
             }
+        }
+    }
+
+    /// Opens a new Ghostty tab in the repo and types the start command there, so the tab's folder is the
+    /// repo's; the `.command` launcher only when scripting Ghostty fails.
+    private func startInGhostty(_ command: String, directory: String) {
+        let controller = GhosttyController(runner: ghosttyRunner)
+        Task { [weak self] in
+            let failure = await Task.detached { () -> GhosttyError? in
+                do {
+                    try controller.openTab(directory: directory, command: command)
+                    return nil
+                } catch let error as GhosttyError {
+                    return error
+                } catch {
+                    return .scriptFailed("\(error)")
+                }
+            }.value
+            guard let self, let failure else { return }
+            if ghosttyAlertsShown.insert(failure.kind).inserted {
+                Alerts.show(failure.alertText)
+            }
+            terminal()?.open(command)
         }
     }
 
@@ -597,7 +633,7 @@ final class AppModel {
     /// Focuses the run's Ghostty tab, else opens its session in a new tab. A session believed ended only
     /// reuses a tab titled like Claude Code, never a plain shell. `findTab` is false for the explicit
     /// "Resume" and for a run without session, which always open a new tab. A scripting failure is reported
-    /// once per kind; then a live session just brings Ghostty to the front and anything else goes through
+    /// once per kind; then (tab list unreadable) a live session just brings Ghostty to the front and anything else goes through
     /// the `.command` launcher.
     private func openInGhostty(_ run: Run, action: SessionAction, findTab: Bool = true) {
         guard !ghosttyBusyRuns.contains(run.id) else { return }
@@ -613,16 +649,24 @@ final class AppModel {
         let folders = SessionLocator.candidateFolders(for: run)
         let directory = run.worktree ?? run.repoPath
         let runID = run.id
+        let key = run.key
         let live = action == .bringToFront
         ghosttyBusyRuns.insert(run.id)
         Task { [weak self] in
             let failure = await Task.detached { () -> GhosttyError? in
                 do {
                     if findTab, action != .start {
+                        // The tab list is authoritative: no matching tab means the session is closed.
                         let terminals = try controller.listTerminals()
-                        if let id = SessionLocator.pickTerminal(terminals, folders: folders, claudeOnly: !live) {
-                            try controller.focus(terminalID: id)
+                        switch action.ghosttyOutcome(terminals: terminals, key: key, folders: folders) {
+                        case let .focus(terminalID):
+                            try controller.focus(terminalID: terminalID)
                             return nil
+                        case .bringGhosttyToFront:
+                            try controller.activate()
+                            return nil
+                        case .openNewTab:
+                            break
                         }
                     }
                     try controller.openTab(directory: directory, command: command)

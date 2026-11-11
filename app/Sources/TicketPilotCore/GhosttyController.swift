@@ -66,6 +66,13 @@ public struct GhosttyController: Sendable {
         """)
     }
 
+    /// Brings Ghostty to the front, without choosing a tab.
+    public func activate() throws {
+        _ = try execute("""
+        tell application "Ghostty" to activate
+        """)
+    }
+
     /// Opens a new tab (a new window when none is open) in `directory` and types `command` in it.
     public func openTab(directory: String, command: String) throws {
         _ = try execute("""
