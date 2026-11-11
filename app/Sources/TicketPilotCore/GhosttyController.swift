@@ -66,6 +66,18 @@ public struct GhosttyController: Sendable {
         """)
     }
 
+    /// The title of the selected tab of Ghostty's front window, nil without a window. Only call it while
+    /// Ghostty runs: a `tell` would launch it.
+    public func selectedTabTitle() throws -> String? {
+        let title = try execute("""
+        tell application "Ghostty"
+            if (count of windows) is 0 then return ""
+            return name of selected tab of front window
+        end tell
+        """).trimmingCharacters(in: .newlines)
+        return title.isEmpty ? nil : title
+    }
+
     /// Brings Ghostty to the front, without choosing a tab.
     public func activate() throws {
         _ = try execute("""

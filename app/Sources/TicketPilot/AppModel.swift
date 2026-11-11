@@ -15,7 +15,7 @@ final class AppModel {
     private(set) var health: [HealthCheck] = []
     private(set) var releasable: Set<String> = []
     private(set) var configError: String?
-    private(set) var openAtLogin = false
+    private(set) var openAtLoginState = false
     /// Disk usage of each run's worktree, by run id.
     private(set) var diskUsage: [String: Int64] = [:]
     /// Commits of each finished run, ready for review, by run id.
@@ -124,6 +124,8 @@ final class AppModel {
     @ObservationIgnored private var watcher: RunWatcher?
     @ObservationIgnored private var issues: [JiraIssue] = []
     @ObservationIgnored private var needsYou = NeedsYouTracker()
+    /// The plain ends of turn waiting their two minutes before a silent notification, by run id.
+    @ObservationIgnored private var quietWaits: [String: (since: Date, task: Task<Void, Never>)] = [:]
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
     @ObservationIgnored private var clockTask: Task<Void, Never>?
     @ObservationIgnored private var terminalTask: Task<Void, Never>?
@@ -153,7 +155,7 @@ final class AppModel {
             notifier = Notifier { [weak self] in self?.handle($0) }
             notifier?.requestAuthorization()
             LoginItem.registerOnce(marker: paths.appDirectory.appendingPathComponent("login-item-registered"))
-            openAtLogin = LoginItem.isEnabled
+            openAtLoginState = LoginItem.isEnabled
         }
         poller = JiraPoller(seenStore: SeenStore(file: paths.appDirectory.appendingPathComponent("seen.json"))) {
             [weak self] outcome, jira in await self?.apply(outcome, from: jira)
@@ -384,11 +386,56 @@ final class AppModel {
         )
     }
 
+    /// Posts a needs-you notification as `NotificationPolicy` says: at once, or (a plain end of turn) two
+    /// minutes later, silently, if the same wait is still pending then.
+    private func schedule(_ event: NeedsYouEvent) {
+        let identifier = event.notificationID(in: runs)
+        switch NotificationPolicy.timing(for: event, in: runs, now: Date()) {
+        case let .now(sound):
+            deliver(event, identifier: identifier, sound: sound)
+        case let .after(deadline, since):
+            let runID = event.runID
+            quietWaits[runID]?.task.cancel()
+            let task = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(max(0, deadline.timeIntervalSinceNow)))
+                guard !Task.isCancelled, let self,
+                      NotificationPolicy.isStillPending(runID: runID, since: since, in: runs)
+                else { return }
+                quietWaits[runID] = nil
+                deliver(event, identifier: identifier, sound: false)
+            }
+            quietWaits[runID] = (since, task)
+        }
+    }
+
+    /// Posts the notification unless the user is looking at the run's session: Ghostty in front, on a tab
+    /// named after the ticket. Any failure to tell just notifies.
+    private func deliver(_ event: NeedsYouEvent, identifier: String, sound: Bool) {
+        guard let notifier else { return }
+        let key = runs.first { $0.id == event.runID }?.key
+        let ghosttyInFront = NSWorkspace.shared.frontmostApplication?.localizedName == "Ghostty"
+        guard case .waiting = event, ghosttyInFront, terminalChoice.isGhostty, let key else {
+            notifier.notify(event, identifier: identifier, sound: sound)
+            return
+        }
+        let controller = GhosttyController(runner: SystemProcessRunner(timeout: 5))
+        Task { [weak self] in
+            let title = await Task.detached { try? controller.selectedTabTitle() }.value ?? nil
+            if NotificationPolicy.userIsWatching(frontmostIsGhostty: true, selectedTabTitle: title, key: key) { return }
+            self?.notifier?.notify(event, identifier: identifier, sound: sound)
+        }
+    }
+
     private func refreshRuns() {
         runs = RunStore(directory: paths.runsDirectory).loadAll()
         rebuildTodo()
         for event in needsYou.events(for: runs) {
-            notifier?.notify(event, identifier: event.notificationID(in: runs))
+            schedule(event)
+        }
+        // A plain end of turn answered (or replaced) within its two minutes is never notified.
+        for (runID, wait) in quietWaits where !NotificationPolicy.isStillPending(runID: runID, since: wait.since, in: runs) {
+            wait.task.cancel()
+            quietWaits[runID] = nil
         }
         updatePresentation()
         measureDiskUsage()
@@ -631,7 +678,8 @@ final class AppModel {
     }
 
     /// Focuses the run's Ghostty tab, else opens its session in a new tab. A session believed ended only
-    /// reuses a tab titled like Claude Code, never a plain shell. `findTab` is false for the explicit
+    /// reuses a tab titled like Claude Code, never a plain shell; a session with no tab is resumed in a new
+    /// one, even when recorded running. `findTab` is false for the explicit
     /// "Resume" and for a run without session, which always open a new tab. A scripting failure is reported
     /// once per kind; then (tab list unreadable) a live session just brings Ghostty to the front and anything else goes through
     /// the `.command` launcher.
@@ -647,7 +695,7 @@ final class AppModel {
         // Long enough to answer the Automation prompt, finite so a hung osascript cannot block the run forever.
         let controller = GhosttyController(runner: ghosttyRunner)
         let folders = SessionLocator.candidateFolders(for: run)
-        let directory = run.worktree ?? run.repoPath
+        let directory = SessionCommand.resumeDirectory(for: run)
         let runID = run.id
         let key = run.key
         let live = action == .bringToFront
@@ -799,6 +847,62 @@ final class AppModel {
         }
     }
 
+    /// "Play a sound when TicketPilot needs you", in Settings.
+    private(set) var playsSoundState = Notifier.playsSound
+    /// "Notifications: allowed" / "not allowed" / "sound off", under Settings' test button.
+    private(set) var notificationStatus: String?
+
+    /// Reads whether macOS shows the app's notifications and plays their sound.
+    func refreshNotificationStatus() {
+        guard notifier != nil else { return }
+        Task { [weak self] in
+            let permissions = await Notifier.permissions()
+            self?.notificationStatus = NotificationStatus.text(
+                allowed: permissions.allowed, soundAllowed: permissions.soundAllowed
+            )
+        }
+    }
+
+    /// Posts the test notification; when macOS does not allow the app's notifications, explains how to
+    /// allow them, with a button to the Notifications settings.
+    func sendTestNotification() {
+        guard notifier != nil else { return }
+        Task { [weak self] in
+            let permissions = await Notifier.permissions()
+            self?.notificationStatus = NotificationStatus.text(
+                allowed: permissions.allowed, soundAllowed: permissions.soundAllowed
+            )
+            guard permissions.allowed else {
+                if Alerts.confirm(NotificationStatus.howToAllow, button: "Open Notifications Settings") {
+                    NSWorkspace.shared.open(NotificationStatus.settingsURL)
+                }
+                return
+            }
+            self?.notifier?.notifyTest()
+        }
+    }
+
+    /// Two-way properties for `$model.…` bindings in Settings: no closure-based `Binding` to cross isolation.
+    var openAtLogin: Bool {
+        get { openAtLoginState }
+        set { setOpenAtLogin(newValue) }
+    }
+
+    var playsSound: Bool {
+        get { playsSoundState }
+        set { setPlaysSound(newValue) }
+    }
+
+    var terminalChoiceName: String? {
+        get { selectedTerminal }
+        set { setTerminalApp(newValue) }
+    }
+
+    func setPlaysSound(_ enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: Notifier.soundKey)
+        playsSoundState = enabled
+    }
+
     func setOpenAtLogin(_ enabled: Bool) {
         guard hasBundle else { return }
         do {
@@ -806,7 +910,7 @@ final class AppModel {
         } catch {
             Alerts.show(AlertText(title: "Open at login was not changed", message: error.localizedDescription))
         }
-        openAtLogin = LoginItem.isEnabled
+        openAtLoginState = LoginItem.isEnabled
     }
 
     /// Does what the setup button offers for the setup problem.

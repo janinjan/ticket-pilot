@@ -56,6 +56,23 @@ struct Notifier {
         center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
+    /// Whether macOS shows the app's notifications, and plays their sound.
+    static func permissions() async -> (allowed: Bool, soundAllowed: Bool) {
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        let allowed = [.authorized, .provisional].contains(settings.authorizationStatus)
+            && settings.alertSetting == .enabled
+        return (allowed, settings.soundSetting == .enabled)
+    }
+
+    /// The test notification from Settings, with the sound when it is on.
+    func notifyTest() {
+        let content = UNMutableNotificationContent()
+        content.title = NotificationStatus.testTitle
+        content.body = NotificationStatus.testBody
+        if Self.playsSound { content.sound = .default }
+        post(content, identifier: "test-\(UUID().uuidString)")
+    }
+
     func notifyNewTicket(_ issue: JiraIssue) {
         let content = UNMutableNotificationContent()
         content.title = "\(issue.key) assigned to you"
@@ -65,8 +82,17 @@ struct Notifier {
         post(content, identifier: issue.key)
     }
 
-    /// `identifier` is `NeedsYouEvent.notificationID(in:)`: one notification per wait.
-    func notify(_ event: NeedsYouEvent, identifier: String) {
+    /// Whether a run waiting for the user, or its report, plays the notification sound (Settings; on by
+    /// default). A new ticket never does.
+    static let soundKey = "PlaySoundWhenNeeded"
+
+    static var playsSound: Bool {
+        UserDefaults.standard.object(forKey: soundKey) as? Bool ?? true
+    }
+
+    /// `identifier` is `NeedsYouEvent.notificationID(in:)`: one notification per wait. With the sound on,
+    /// macOS plays the default notification sound.
+    func notify(_ event: NeedsYouEvent, identifier: String, sound: Bool = true) {
         let text = NotificationText.make(event)
         let content = UNMutableNotificationContent()
         content.title = text.title
@@ -76,6 +102,7 @@ struct Notifier {
         case .reportReady: ID.reportCategory
         }
         content.userInfo = [ID.runID: event.runID]
+        if sound, Self.playsSound { content.sound = .default }
         post(content, identifier: identifier)
     }
 

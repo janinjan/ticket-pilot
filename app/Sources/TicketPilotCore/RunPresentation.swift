@@ -172,9 +172,11 @@ public struct RunLine: Equatable, Sendable {
         max(0, Int(end.timeIntervalSince(start) / 60))
     }
 
+    /// "45 min", "2 h 14", past a day "1 d 3 h".
     private static func duration(_ minutes: Int) -> String {
         guard minutes >= 60 else { return "\(minutes) min" }
-        return "\(minutes / 60) h " + String(format: "%02d", minutes % 60)
+        guard minutes >= 24 * 60 else { return "\(minutes / 60) h " + String(format: "%02d", minutes % 60) }
+        return "\(minutes / (24 * 60)) d \(minutes % (24 * 60) / 60) h"
     }
 }
 

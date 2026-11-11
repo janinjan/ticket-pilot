@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import TicketPilotCore
 
-@Suite struct RunPresentationTests {
+@Suite(.timeLimit(.minutes(1))) struct RunPresentationTests {
     static let now = Date(timeIntervalSince1970: 1_800_000_000)
 
     static func run(
@@ -84,6 +84,9 @@ import Testing
         #expect(long.detail == "Step 6 of 10 · Verifying (build, tests) · 1 h 05")
         #expect(long.title == "ABC-1")
 
+        let days = RunLine.make(Self.run(startedMinutesAgo: 27 * 60 + 10), now: Self.now, stuckMinutes: ["verify": 9999])
+        #expect(days.detail == "Step 6 of 10 · Verifying (build, tests) · 1 d 3 h")
+
         let fallback = RunLine.make(Self.run(startedMinutesAgo: nil), now: Self.now, stuckMinutes: [:])
         #expect(fallback.detail == "Step 6 of 10 · Verifying (build, tests) · 0 min")
 
@@ -118,7 +121,7 @@ import Testing
     }
 
     @Test func test_reportReadyLineSaysSoWithoutATime() {
-        var run = Self.run(status: .done)
+        var run = Self.run(status: .done, startedMinutesAgo: nil)
         run.updatedAt = Self.now.addingTimeInterval(-36 * 60)
         let line = RunLine.make(run, now: Self.now, stuckMinutes: [:])
         #expect(line.section == .reportReady)

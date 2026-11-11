@@ -87,3 +87,58 @@ public struct NotificationText: Equatable, Sendable {
         }
     }
 }
+
+/// What Settings says about the app's notifications, and its test notification.
+public enum NotificationStatus {
+    public static let testTitle = "TicketPilot test"
+    public static let testBody = "This is how TicketPilot tells you a run needs you."
+    /// System Settings › Notifications.
+    public static let settingsURL = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!
+
+    public static let howToAllow = AlertText(
+        title: "Notifications are not allowed",
+        message: "In System Settings › Notifications › TicketPilot, turn on Allow notifications, choose Banners "
+            + "or Alerts, and turn on Play sound for notifications."
+    )
+
+    /// "Notifications: allowed", "… sound off" (allowed without sound) or "… not allowed".
+    public static func text(allowed: Bool, soundAllowed: Bool) -> String {
+        guard allowed else { return "Notifications: not allowed" }
+        return soundAllowed ? "Notifications: allowed" : "Notifications: sound off"
+    }
+}
+
+/// When a needs-you notification is posted, and with or without sound.
+public enum NotificationTiming: Equatable, Sendable {
+    case now(sound: Bool)
+    /// At `Date`, silently, if the wait that began at `since` is still pending then.
+    case after(Date, since: Date)
+}
+
+/// Which waits are worth a notification. The plugin's Stop hook marks every end of a Claude Code turn as a
+/// wait (`input`): while the user is in the session, that is no news.
+public enum NotificationPolicy {
+    /// How long a plain end of turn must stay unanswered before it is notified.
+    public static let quietInputDelay: TimeInterval = 120
+
+    /// A go, a question or "launch the app", and a ready report: at once, with sound. A plain end of turn
+    /// (`input`): two minutes after it began, silently.
+    public static func timing(for event: NeedsYouEvent, in runs: [Run], now: Date) -> NotificationTiming {
+        guard case let .waiting(runID, _, kind, _) = event, kind == "input" else { return .now(sound: true) }
+        guard let since = runs.first(where: { $0.id == runID })?.waiting?.since else { return .now(sound: false) }
+        let deadline = since.addingTimeInterval(quietInputDelay)
+        return deadline > now ? .after(deadline, since: since) : .now(sound: false)
+    }
+
+    /// The run still waits, and for the same wait (`since` unchanged).
+    public static func isStillPending(runID: String, since: Date, in runs: [Run]) -> Bool {
+        guard let run = runs.first(where: { $0.id == runID }) else { return false }
+        return run.status == .waiting && run.waiting?.since == since
+    }
+
+    /// Ghostty is the frontmost app and its selected tab is the run's session (its title names the key).
+    public static func userIsWatching(frontmostIsGhostty: Bool, selectedTabTitle: String?, key: String) -> Bool {
+        guard frontmostIsGhostty, let title = selectedTabTitle else { return false }
+        return SessionLocator.names(title, key: key)
+    }
+}

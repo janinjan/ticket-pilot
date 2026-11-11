@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import TicketPilotCore
 
-@Suite struct NeedsYouTrackerTests {
+@Suite(.timeLimit(.minutes(1))) struct NeedsYouTrackerTests {
     static let t0 = Date(timeIntervalSince1970: 1_800_000_000)
 
     static func run(
@@ -116,5 +116,69 @@ import Testing
         let noWaiting = Self.run(status: .running)
         #expect(event.notificationID(in: [noWaiting]) == "ABC-1--ios@1800000000")
         #expect(event.notificationID(in: []) == "ABC-1--ios@unknown")
+    }
+}
+
+@Suite(.timeLimit(.minutes(1))) struct NotificationStatusTests {
+    @Test func test_settingsSaysWhetherNotificationsAndTheirSoundAreAllowed() {
+        #expect(NotificationStatus.text(allowed: true, soundAllowed: true) == "Notifications: allowed")
+        #expect(NotificationStatus.text(allowed: true, soundAllowed: false) == "Notifications: sound off")
+        #expect(NotificationStatus.text(allowed: false, soundAllowed: true) == "Notifications: not allowed")
+        #expect(NotificationStatus.text(allowed: false, soundAllowed: false) == "Notifications: not allowed")
+    }
+
+    @Test func test_theTestNotificationExplainsItself() {
+        #expect(NotificationStatus.testTitle == "TicketPilot test")
+        #expect(NotificationStatus.testBody == "This is how TicketPilot tells you a run needs you.")
+        #expect(NotificationStatus.settingsURL.absoluteString
+            == "x-apple.systempreferences:com.apple.Notifications-Settings.extension")
+    }
+}
+
+@Suite(.timeLimit(.minutes(1))) struct NotificationPolicyTests {
+    static let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+
+    static func run(_ status: Run.Status = .waiting, kind: String = "input", since: Date = t0) -> Run {
+        NeedsYouTrackerTests.run(status: status, kind: kind, since: since)
+    }
+
+    static func waiting(_ kind: String) -> NeedsYouEvent {
+        .waiting(runID: "ABC-1--ios", key: "ABC-1", kind: kind, text: "")
+    }
+
+    @Test func test_aRealQuestionNotifiesAtOnceWithSound() {
+        for kind in ["go", "question", "launch_app"] {
+            #expect(NotificationPolicy.timing(for: Self.waiting(kind), in: [Self.run(kind: kind)], now: Self.t0)
+                == .now(sound: true), "\(kind)")
+        }
+        #expect(NotificationPolicy.timing(for: .reportReady(runID: "ABC-1--ios", key: "ABC-1"), in: [], now: Self.t0)
+            == .now(sound: true))
+    }
+
+    @Test func test_aPlainEndOfTurnWaitsTwoMinutesAndStaysSilent() {
+        let run = Self.run(kind: "input")
+        #expect(NotificationPolicy.timing(for: Self.waiting("input"), in: [run], now: Self.t0.addingTimeInterval(5))
+            == .after(Self.t0.addingTimeInterval(120), since: Self.t0))
+        // Seen only once the two minutes are over (the Mac slept): at once, still silent.
+        #expect(NotificationPolicy.timing(for: Self.waiting("input"), in: [run], now: Self.t0.addingTimeInterval(300))
+            == .now(sound: false))
+    }
+
+    @Test func test_theDelayedNotificationNeedsTheSameWaitStillPending() {
+        let since = Self.t0
+        #expect(NotificationPolicy.isStillPending(runID: "ABC-1--ios", since: since, in: [Self.run(since: since)]))
+        // The user answered (the run went on), or a new turn ended (a new `since`), or the run is gone.
+        #expect(!NotificationPolicy.isStillPending(runID: "ABC-1--ios", since: since, in: [Self.run(.running)]))
+        #expect(!NotificationPolicy.isStillPending(
+            runID: "ABC-1--ios", since: since, in: [Self.run(since: since.addingTimeInterval(30))]
+        ))
+        #expect(!NotificationPolicy.isStillPending(runID: "ABC-1--ios", since: since, in: []))
+    }
+
+    @Test func test_noNotificationWhileTheUserLooksAtTheSessionTab() {
+        #expect(NotificationPolicy.userIsWatching(frontmostIsGhostty: true, selectedTabTitle: "✳ ABC-1 Jira ticket", key: "ABC-1"))
+        #expect(!NotificationPolicy.userIsWatching(frontmostIsGhostty: false, selectedTabTitle: "✳ ABC-1 Jira ticket", key: "ABC-1"))
+        #expect(!NotificationPolicy.userIsWatching(frontmostIsGhostty: true, selectedTabTitle: "✳ ABC-12 other", key: "ABC-1"))
+        #expect(!NotificationPolicy.userIsWatching(frontmostIsGhostty: true, selectedTabTitle: nil, key: "ABC-1"))
     }
 }

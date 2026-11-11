@@ -3,15 +3,28 @@ import TicketPilotCore
 
 /// The Settings window: Open at login, the terminal, the Jira connection, and every setup check.
 struct SettingsView: View {
-    let model: AppModel
+    @Bindable var model: AppModel
 
     var body: some View {
         Form {
             Section {
-                Toggle("Open at login", isOn: Binding(get: { model.openAtLogin }, set: model.setOpenAtLogin))
+                Toggle("Open at login", isOn: $model.openAtLogin)
                     .disabled(!model.hasBundle)
                     .accessibilityHint(model.hasBundle ? "" : "Only available when TicketPilot runs from its app")
-                Picker("Terminal", selection: Binding(get: { model.selectedTerminal }, set: model.setTerminalApp)) {
+                Toggle("Play a sound when TicketPilot needs you", isOn: $model.playsSound)
+                    .disabled(!model.hasBundle)
+                    .accessibilityHint(model.hasBundle ? "" : "Only available when TicketPilot runs from its app")
+                VStack(alignment: .leading, spacing: 2) {
+                    Button("Send a test notification", action: model.sendTestNotification)
+                        .disabled(!model.hasBundle)
+                    if let status = model.notificationStatus {
+                        Text(status)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .onAppear(perform: model.refreshNotificationStatus)
+                Picker("Terminal", selection: $model.terminalChoiceName) {
                     Text("Automatic (\(model.automaticTerminal?.appName ?? "…"))")
                         .tag(String?.none)
                     ForEach(model.terminalOptions, id: \.self) { name in
