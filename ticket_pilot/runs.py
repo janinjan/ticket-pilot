@@ -93,6 +93,7 @@ def start(key: str, repo: str, repo_path: str) -> dict:
     run = {
         "id": identifier,
         "key": key,
+        "title": None,
         "repo": repo,
         "repo_path": repo_path,
         "worktree": None,

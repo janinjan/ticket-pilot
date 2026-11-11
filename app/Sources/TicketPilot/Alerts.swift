@@ -36,29 +36,57 @@ enum Alerts {
         return alert.runModal() == .alertFirstButtonReturn
     }
 
-    /// Asks for the Jira API token; nil when cancelled or empty. The token is only returned, never kept.
+    /// Asks for the Jira API token, explaining how to get one; nil when cancelled. The token is only
+    /// returned, never kept. "Create a token" opens the Atlassian page and keeps the dialog open, so the
+    /// token can be pasted when the user comes back.
     static func askJiraToken(site: String, email: String) -> String? {
         let alert = NSAlert()
-        alert.messageText = "Jira API token"
-        alert.informativeText = "Paste the API token for \(email) on \(site). It is stored in your Keychain."
+        alert.messageText = "Connect Jira"
+        alert.informativeText = """
+        TicketPilot needs an API token to read your tickets on \(site) as \(email).
+
+        1. Click Create a token — Atlassian opens in your browser.
+        2. Create a token, then copy it.
+        3. Paste it below and click Save.
+        """
         let field = PastableSecureTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
-        alert.accessoryView = field
+        field.placeholderString = "Paste your API token"
+        field.setAccessibilityLabel("Jira API token")
+        let note = NSTextField(labelWithString: "Stored only in your Mac's Keychain.")
+        note.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        note.textColor = .secondaryLabelColor
+        let stack = NSStackView(views: [field, note])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 6
+        stack.frame = NSRect(x: 0, y: 0, width: 300, height: 48)
+        alert.accessoryView = stack
         alert.addButton(withTitle: "Save")
-        alert.addButton(withTitle: "Cancel")
-        alert.addButton(withTitle: "Create a token on Atlassian")
+        let create = alert.addButton(withTitle: "Create a token")
+        let opener = URLOpener(url: atlassianTokensURL)
+        create.target = opener
+        create.action = #selector(URLOpener.open)
+        create.setAccessibilityHelp("Opens the Atlassian page where API tokens are made")
+        let cancel = alert.addButton(withTitle: "Cancel")
+        cancel.keyEquivalent = "\u{1b}"
         alert.window.initialFirstResponder = field
         NSApp.activate()
-        switch alert.runModal() {
-        case .alertFirstButtonReturn:
-            return field.stringValue
-        case .alertThirdButtonReturn:
-            // The alert closes rather than reopens: reopening would cover the browser that was just
-            // opened. Connect Jira… in the panel (or Set Jira token… in Settings) brings it back.
-            NSWorkspace.shared.open(atlassianTokensURL)
-            return nil
-        default:
-            return nil
-        }
+        let response = withExtendedLifetime(opener) { alert.runModal() }
+        return response == .alertFirstButtonReturn ? field.stringValue : nil
+    }
+}
+
+/// Opens a URL from a button without closing the alert it belongs to.
+@MainActor
+private final class URLOpener: NSObject {
+    private let url: URL
+
+    init(url: URL) {
+        self.url = url
+    }
+
+    @objc func open() {
+        NSWorkspace.shared.open(url)
     }
 }
 

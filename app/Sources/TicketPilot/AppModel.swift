@@ -18,6 +18,8 @@ final class AppModel {
     private(set) var openAtLogin = false
     /// Disk usage of each run's worktree, by run id.
     private(set) var diskUsage: [String: Int64] = [:]
+    /// Commits of each finished run, ready for review, by run id.
+    private(set) var commitCounts: [String: Int] = [:]
     /// The check whose fix command was just copied: it reads "Copied ✓" for a few seconds.
     private(set) var copiedFix: HealthCheck.Kind?
     /// The terminal sessions open in, resolved at launch and on "Check again".
@@ -33,6 +35,8 @@ final class AppModel {
     private(set) var jiraAnswered = false
     private(set) var runs: [Run] = []
     private(set) var acknowledged: Set<String> = []
+    /// The Jira summary of each assigned ticket, by key: the title of a run that has none of its own.
+    private(set) var summaries: [String: String] = [:]
     /// True from the plugin install's confirmation until its last command has run.
     private(set) var installingPlugin = false
 
@@ -52,16 +56,17 @@ final class AppModel {
     var setupProblemTitle: String? {
         guard let setupProblem else { return nil }
         if case let .copyFix(check) = setupProblem.action, copiedFix == check.id { return "Copied ✓" }
-        return setupProblem.title
+        return setupProblem.buttonTitle
     }
 
-    /// The headline under the panel's big mark.
+    /// The headline under the panel's mark.
     var status: PanelStatus {
         PanelStatus.make(
             runs: runs,
             acknowledgedDone: acknowledged,
             setupProblem: setupProblem,
-            todoCount: jiraAnswered ? todo.ready.count + todo.backlog.count : nil
+            todoCount: jiraAnswered ? todo.ready.count + todo.backlog.count : nil,
+            summaries: summaries
         )
     }
 
@@ -102,6 +107,9 @@ final class AppModel {
     @ObservationIgnored private var copiedTask: Task<Void, Never>?
     /// The run version (`updatedAt`) each size was measured for, or is being measured for.
     @ObservationIgnored private var measuredAt: [String: Date] = [:]
+    /// What each commit count was made for, or is being made for: the run version (`updatedAt`) and the
+    /// main branch, so that a config change counts again.
+    @ObservationIgnored private var countedFor: [String: CommitCountKey] = [:]
 
     private var acknowledgedStore: SeenStore {
         SeenStore(file: paths.appDirectory.appendingPathComponent("acknowledged.json"))
@@ -238,6 +246,9 @@ final class AppModel {
             configError = nil
             configuredTerminal = config?.terminalApp
             resolveTerminal(configured: config?.terminalApp)
+            // Runs are read before the config at launch: what depends on it is derived again.
+            countCommits()
+            updatePresentation()
         } catch {
             config = nil
             configuredTerminal = nil
@@ -245,6 +256,7 @@ final class AppModel {
             case let .missing(path): "not found at \(path)"
             case let .invalid(message): message
             }
+            updatePresentation()
         }
     }
 
@@ -258,6 +270,8 @@ final class AppModel {
             jiraFailing = false
             jiraAnswered = true
             self.issues = issues
+            summaries = Dictionary(issues.map { ($0.key, $0.summary) }, uniquingKeysWith: { first, _ in first })
+            updatePresentation()
             todo = TodoList(issues: issues, readyStatuses: config?.readyStatuses ?? [])
             newTickets.forEach { notifier?.notifyNewTicket($0) }
             await refreshReleasable(jira)
@@ -291,6 +305,7 @@ final class AppModel {
         }
         updatePresentation()
         measureDiskUsage()
+        countCommits()
     }
 
     /// Also run every minute, so a run interrupted without a status update stops keeping the Mac awake.
@@ -298,11 +313,18 @@ final class AppModel {
         iconState = RunIconState.make(runs: runs, acknowledgedDone: acknowledged)
         let now = Date()
         let stuckMinutes = config?.stuckMinutes ?? [:]
-        runGroups = RunGroup.make(runs: runs, now: now, stuckMinutes: stuckMinutes)
+        runGroups = RunGroup.make(
+            runs: runs, now: now, stuckMinutes: stuckMinutes, summaries: summaries, commits: commitCounts
+        )
         sleepGuard.update(anyRunning: SleepPolicy.keepsMacAwake(runs: runs, now: now, stuckMinutes: stuckMinutes))
     }
 
     /// "Show in Finder · <size>" for a run with a worktree.
+    /// The worktree's size, once measured.
+    func worktreeSize(runID: String) -> String? {
+        RunLine.sizeLabel(bytes: diskUsage[runID])
+    }
+
     func showInFinderTitle(runID: String) -> String? {
         runs.first { $0.id == runID }.flatMap { RunLine.showInFinderTitle($0, bytes: diskUsage[runID]) }
     }
@@ -311,6 +333,36 @@ final class AppModel {
     func revealWorktree(runID: String) {
         guard let path = runs.first(where: { $0.id == runID })?.worktree else { return }
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+    }
+
+    /// Counts the commits of each finished run off the main actor, again only when its run file or its
+    /// repo's main branch changed. Without a worktree or a known main branch (no config yet), nothing is
+    /// recorded, so the run is counted once the config is loaded; the card says "ready for review" meanwhile.
+    private func countCommits() {
+        let finished = runs.filter { $0.status == .done }
+        let ids = Set(finished.map(\.id))
+        commitCounts = commitCounts.filter { ids.contains($0.key) }
+        countedFor = countedFor.filter { ids.contains($0.key) }
+        let counter = CommitCounter(runner: untimedRunner)
+        for run in finished {
+            guard let worktree = run.worktree,
+                  let mainBranch = config?.repos.first(where: { $0.name == run.repo })?.mainBranch
+            else { continue }
+            let version = CommitCountKey(updatedAt: run.updatedAt, mainBranch: mainBranch)
+            guard countedFor[run.id] != version else { continue }
+            countedFor[run.id] = version
+            let runID = run.id
+            let branch = run.branch
+            Task { [weak self] in
+                let count = await Task.detached {
+                    counter.count(worktree: worktree, branch: branch, mainBranch: mainBranch)
+                }.value
+                // A newer count of the same run (or its removal) wins over this one.
+                guard let self, self.countedFor[runID] == version else { return }
+                self.commitCounts[runID] = count
+                self.updatePresentation()
+            }
+        }
     }
 
     /// Measures the worktree of each finished run off the main actor, again only when its run file changed.
@@ -709,6 +761,12 @@ final class AppModel {
             openSession(runID: runID)
         }
     }
+}
+
+/// What a commit count was made for.
+private struct CommitCountKey: Equatable {
+    var updatedAt: Date
+    var mainBranch: String
 }
 
 private extension String {

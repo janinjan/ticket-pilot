@@ -283,6 +283,9 @@ class StartSkillTests(unittest.TestCase):
         self.assertIn("Not inside a git repo", startup)
         self.assertRegex(startup, r'tp"? run-list')
 
+    def test_ticket_title_is_recorded_in_step_one(self):
+        self.assertRegex(step_sections(skill())[1], r'tp"? run-set <id> --title "')
+
     def test_requests_are_recorded_and_reused_on_resume(self):
         text = skill()
         self.assertRegex(step_sections(text)[1], r'tp"? run-set <id> --request "')

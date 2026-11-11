@@ -91,8 +91,10 @@ def cmd_run_set(args: argparse.Namespace) -> int:
         fields["jira_line"] = args.jira_line == "yes"
     if args.request is not None:
         fields["requests"] = args.request
+    if args.title is not None:
+        fields["title"] = args.title
     if not fields:
-        return _fail("run-set needs at least one of --worktree, --branch, --jira-line, --request")
+        return _fail("run-set needs at least one of --worktree, --branch, --jira-line, --request, --title")
     return _with_run(args, lambda: runs.update(args.run_id, **fields))
 
 
@@ -156,7 +158,7 @@ def build_parser() -> argparse.ArgumentParser:
     listing = subparsers.add_parser("run-list", help="print one line per stored run")
     listing.set_defaults(func=cmd_run_list)
 
-    update = subparsers.add_parser("run-set", help="set worktree, branch, jira-line or requests")
+    update = subparsers.add_parser("run-set", help="set worktree, branch, jira-line, requests or title")
     update.add_argument("run_id")
     update.add_argument("--worktree")
     update.add_argument("--branch")
@@ -165,6 +167,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--request", action="append",
         help="one numbered request, in order; repeat it for each one (replaces the stored list)",
     )
+    update.add_argument("--title", help="the ticket's title, shown by the menu bar app")
     update.set_defaults(func=cmd_run_set)
 
     size = subparsers.add_parser("commit-size", help="measure a commit against the review threshold")

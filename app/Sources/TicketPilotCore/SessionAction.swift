@@ -1,6 +1,6 @@
 import Foundation
 
-/// What "Open session" does for a run.
+/// What the session button of a run ("Answer", "Follow", "Read the report", "Resume") does.
 public enum SessionAction: Equatable, Sendable {
     /// The session ended (or its state is unknown): reopen it in a new terminal window.
     case resume

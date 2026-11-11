@@ -78,6 +78,8 @@ Run `"<plugin-root>/bin/tp" run-step <id> 1`.
    - description and acceptance criteria;
    - **every comment**: a late comment often changes the scope ("in the end we do X");
    - attachments, linked tickets, the parent epic.
+
+   Record the ticket's title, as written in Jira, for the menu bar app: `"<plugin-root>/bin/tp" run-set <id> --title "<title>"`.
 2. Read **every** Confluence page linked from the ticket, images included, every Figma link, and every linked Slack thread. If a source cannot be read (missing tool, no access), list it as unread; never guess its content.
 3. Write the **numbered list of requests**: one request per number, each with its source (ticket description, comment, Confluence page, Figma frame…). Record it, in order, one flag per request: `"<plugin-root>/bin/tp" run-set <id> --request "<1. request — source>" --request "<2. …>"`. Record it again whenever the list changes (an answer of the user, a resume).
 4. Present to the user: a short summary, the numbered requests, the target repo, and the ambiguous points.

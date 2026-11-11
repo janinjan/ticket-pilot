@@ -22,19 +22,19 @@ public enum GhosttyError: Error, Equatable, Sendable {
             AlertText(
                 title: "TicketPilot cannot control Ghostty",
                 message: "Allow TicketPilot to control Ghostty in System Settings › Privacy & Security › Automation. "
-                    + "Until then, Open session brings Ghostty to the front without choosing a tab."
+                    + "Until then, the session button brings Ghostty to the front without choosing a tab."
             )
         case .timedOut:
             AlertText(
                 title: "Ghostty did not answer",
                 message: "macOS may be waiting for your answer to the Automation prompt. Allow TicketPilot to "
                     + "control Ghostty in System Settings › Privacy & Security › Automation. "
-                    + "Until then, Open session brings Ghostty to the front without choosing a tab."
+                    + "Until then, the session button brings Ghostty to the front without choosing a tab."
             )
         case let .scriptFailed(message):
             AlertText(
                 title: "Ghostty did not answer",
-                message: "\(message)\n\nOpen session brings Ghostty to the front without choosing a tab."
+                message: "\(message)\n\nThe session button brings Ghostty to the front without choosing a tab."
             )
         }
     }

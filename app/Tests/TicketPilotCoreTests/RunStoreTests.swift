@@ -2,10 +2,10 @@ import Foundation
 import Testing
 @testable import TicketPilotCore
 
-@Suite struct RunStoreTests {
+@Suite(.timeLimit(.minutes(1))) struct RunStoreTests {
     static let pluginRun = """
     {
-      "id": "ABC-1--ios", "key": "ABC-1", "repo": "ios", "repo_path": "/repos/ios",
+      "id": "ABC-1--ios", "key": "ABC-1", "title": "Show the distance", "repo": "ios", "repo_path": "/repos/ios",
       "worktree": "/repos/ios-wt", "branch": "abc-1", "session_id": "s1",
       "session": {"state": "running", "last_notification": null, "notified_at": null},
       "step": 6, "step_name": "verify", "status": "waiting",
@@ -38,6 +38,7 @@ import Testing
         #expect(run.sessionID == "s1")
         #expect(run.session?.state == "running")
         #expect(run.step == 6)
+        #expect(run.title == "Show the distance")
     }
 
     @Test func test_decodesRunFromOlderPlugin() throws {
@@ -47,6 +48,10 @@ import Testing
         #expect(run.history.isEmpty)
         #expect(run.status == .unknown)
         #expect(run.worktree == nil)
+        #expect(run.title == nil)
+        // A title of the wrong type is dropped, never the run.
+        let oddTitle = Self.olderRun.replacingOccurrences(of: "\"foo\": 1", with: "\"title\": 42")
+        #expect(try JSONDecoder.runDecoder.decode(Run.self, from: Data(oddTitle.utf8)).title == nil)
 
         let malformed = """
         {

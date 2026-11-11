@@ -16,9 +16,10 @@ struct PanelView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            hero
-                .padding(.top, 2)
-                .padding(.bottom, 12)
+            top
+                .padding(.horizontal, 12)
+                .padding(.top, 4)
+                .padding(.bottom, 10)
             if hasList {
                 Divider()
                 ScrollView {
@@ -28,11 +29,8 @@ struct PanelView: View {
                 }
                 .frame(height: min(max(listHeight, 1), Self.maxListHeight))
             }
-            if let title = model.setupProblemTitle {
-                Divider()
-                setupButton(title)
-                    .padding(12)
-            }
+            Divider()
+            footer
         }
         .frame(width: 300)
         .background(HostWindowReader(host: host))
@@ -60,7 +58,10 @@ struct PanelView: View {
 
     private var header: some View {
         HStack(spacing: 6) {
-            BrandMark(size: 16)
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .frame(width: 18, height: 18)
+                .accessibilityHidden(true)
             Text("TicketPilot")
                 .font(.headline)
             Spacer()
@@ -69,9 +70,6 @@ struct PanelView: View {
                 Button("Settings…", action: closing(model.showSettings))
                     .keyboardShortcut(",")
                 Button("Send feedback", action: closing(model.sendFeedback))
-                Divider()
-                Button("Quit TicketPilot") { NSApplication.shared.terminate(nil) }
-                    .keyboardShortcut("q")
             } label: {
                 Image(systemName: "gearshape")
             }
@@ -87,24 +85,50 @@ struct PanelView: View {
         .padding(.top, 6)
     }
 
-    private var hero: some View {
+    /// Quit, always in sight, as in the other menu bar apps.
+    private var footer: some View {
+        HStack {
+            Spacer()
+            Button("Quit") { NSApplication.shared.terminate(nil) }
+                .buttonStyle(.borderless)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .keyboardShortcut("q")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+    }
+
+    /// The status line; with a setup problem, a banner that holds its fix button.
+    @ViewBuilder
+    private var top: some View {
         let status = model.status
-        return VStack(spacing: 4) {
-            BrandMark(size: 56, emphasized: status.tint == .attention)
-                .padding(.bottom, 6)
+        let text = VStack(alignment: .leading, spacing: 2) {
             Text(status.headline)
-                .font(.headline)
-                .multilineTextAlignment(.center)
+                .font(.subheadline.weight(.semibold))
                 .accessibilityAddTraits(.isHeader)
             if let subtitle = status.subtitle {
                 Text(subtitle)
-                    .font(.callout)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
+        if status.needsSetup, let title = model.setupProblemTitle {
+            VStack(alignment: .leading, spacing: 8) {
+                text
+                setupButton(title)
+            }
+            .padding(10)
+            .background(Brand.orange.opacity(0.12), in: Card.shape)
+            .overlay(Card.shape.strokeBorder(Brand.orange.opacity(0.3), lineWidth: 1))
+            .accessibilityElement(children: .contain)
+        } else {
+            text
+        }
     }
 
     // MARK: - Runs and tickets
@@ -134,29 +158,39 @@ struct PanelView: View {
     }
 
     private func runCard(_ line: RunLine) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(line.name)
-                        .font(.callout.weight(.semibold).monospaced())
-                    if line.isStuck {
-                        StuckTag()
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(line.title)
+                            .font(.callout.weight(.semibold))
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                        if line.isStuck {
+                            StuckTag()
+                        }
                     }
-                    Spacer(minLength: 0)
+                    .accessibilityElement(children: .combine)
+                    sessionButton(line)
                 }
-                Text(line.detail)
-                    .font(.callout)
-                    .foregroundStyle(line.section == .needsYou ? .primary : .secondary)
-                    .lineLimit(line.section == .needsYou ? nil : 3)
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(line.context)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(line.detail)
+                        .font(.callout)
+                        .foregroundStyle(line.section == .needsYou ? .primary : .secondary)
+                        .lineLimit(line.section == .needsYou ? nil : 3)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 2)
+                }
+                .accessibilityElement(children: .combine)
             }
-            .accessibilityElement(children: .combine)
             if let filled = line.filledSteps {
                 StepDots(filled: filled, total: RunLine.stepCount, description: line.progressDescription ?? "")
             }
-            runButtons(line)
-                .frame(maxWidth: .infinity, alignment: .trailing)
-                .padding(.top, 2)
+            secondaryRunButtons(line)
         }
         .padding(10)
         .background(Card.background, in: Card.shape)
@@ -164,44 +198,71 @@ struct PanelView: View {
         .accessibilityLabel(line.isStuck ? "\(line.name), maybe stuck" : line.name)
     }
 
+    /// "Show in Finder" and "Release…", under the card's text; nothing when neither applies.
     @ViewBuilder
-    private func runButtons(_ line: RunLine) -> some View {
+    private func secondaryRunButtons(_ line: RunLine) -> some View {
         let finderTitle = line.section == .reportReady ? model.showInFinderTitle(runID: line.runID) : nil
         let releasable = model.releasable.contains(line.runID)
-        let buttons = Group {
-            if releasable {
-                Button("Release…", action: closing { model.release(runID: line.runID) })
+        if finderTitle != nil || releasable {
+            HStack(spacing: 6) {
+                if let finderTitle {
+                    finderButton(line, title: finderTitle)
+                }
+                if releasable {
+                    Button(action: closing { model.release(runID: line.runID) }) {
+                        Text("Release…")
+                            .lineLimit(1)
+                            .fixedSize()
+                    }
                     .buttonStyle(.brandSecondary)
                     .accessibilityLabel("Release \(line.name)")
+                }
             }
-            if let finderTitle {
-                Button(finderTitle, action: closing { model.revealWorktree(runID: line.runID) })
-                    .buttonStyle(.brandSecondary)
-                    .accessibilityLabel("\(finderTitle), \(line.name)")
+            .padding(.top, 2)
+        }
+    }
+
+    private func finderButton(_ line: RunLine, title finderTitle: String) -> some View {
+        Button(action: closing { model.revealWorktree(runID: line.runID) }) {
+            HStack(spacing: 4) {
+                Text("Show in Finder")
+                if let size = model.worktreeSize(runID: line.runID) {
+                    Text(size)
+                        .foregroundStyle(.tertiary)
+                }
             }
-            Button("Open session", action: closing { model.openSession(runID: line.runID) })
-                .buttonStyle(.brand)
-                .accessibilityLabel("Open session for \(line.name)")
+            .lineLimit(1)
+            .fixedSize()
         }
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 6) { buttons }
-            VStack(alignment: .trailing, spacing: 4) { buttons }
+        .buttonStyle(.brandSecondary)
+        .help("Reveal the worktree in the Finder")
+        .accessibilityLabel("\(finderTitle), \(line.name)")
+    }
+
+    private func sessionButton(_ line: RunLine) -> some View {
+        Button(action: closing { model.openSession(runID: line.runID) }) {
+            Text(line.sessionButton)
+                .lineLimit(1)
+                .fixedSize()
         }
+        .buttonStyle(.brand)
+        .help("Opens the session in your terminal")
+        .accessibilityLabel("\(line.sessionButton), \(line.name)")
     }
 
     private func ticketRow(_ issue: JiraIssue) -> some View {
         let reason = model.startBlockReason(issue)
-        return HStack(alignment: .firstTextBaseline, spacing: 8) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(issue.key)
-                    .font(.callout.weight(.semibold).monospaced())
+        return HStack(alignment: .center, spacing: 6) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(issue.summary)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .font(.callout.weight(.medium))
                     .lineLimit(2)
                     .truncationMode(.tail)
                     .fixedSize(horizontal: false, vertical: true)
                     .help(issue.summary)
+                Text("\(issue.key) · \(issue.statusName)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             .accessibilityElement(children: .combine)
             Spacer(minLength: 4)
@@ -224,7 +285,7 @@ struct PanelView: View {
                 .accessibilityHint(reason.map { "Unavailable: \($0)" } ?? "")
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.vertical, 7)
         .contentShape(Rectangle())
         .contextMenu {
             Button("Start", action: closing { model.startTicket(issue) })
@@ -242,10 +303,9 @@ struct PanelView: View {
         default: false
         }
         return Button(title, action: staysOpen ? model.fixSetupProblem : closing(model.fixSetupProblem))
-            .buttonStyle(BrandButtonStyle(large: true))
+            .buttonStyle(.brand)
             .keyboardShortcut(.defaultAction)
-            .accessibilityLabel(title == "Copied ✓" ? "Copied" : title)
-            .frame(maxWidth: .infinity)
+            .accessibilityLabel(title == "Copied ✓" ? "Copied" : title.replacingOccurrences(of: " →", with: ""))
     }
 }
 

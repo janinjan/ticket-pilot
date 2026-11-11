@@ -49,6 +49,7 @@ class RunsTests(RunsTestCase):
         self.assertIsNone(run["session"])
         self.assertIsNone(run["session_id"])
         self.assertEqual(run["requests"], [])
+        self.assertIsNone(run["title"])
         self.assertEqual(len(run["history"]), 1)
 
     def test_start_is_idempotent(self):
@@ -251,6 +252,13 @@ class RunsCliTests(RunsTestCase):
             out.splitlines(),
             ["ABC-1--app done step 1 understand -", "ABC-2--api running step 3 research /w"],
         )
+
+    def test_cli_set_title(self):
+        self.run_cli("run-start", "ABC-1", "app", "/tmp/app")
+        self.assertIsNone(runs.load("ABC-1--app")["title"])
+        code, _, _ = self.run_cli("run-set", "ABC-1--app", "--title", "Show the distance to the shop")
+        self.assertEqual(code, 0)
+        self.assertEqual(runs.load("ABC-1--app")["title"], "Show the distance to the shop")
 
     def test_cli_set_requires_a_flag(self):
         self.run_cli("run-start", "ABC-1", "app", "/tmp/app")

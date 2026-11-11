@@ -61,6 +61,8 @@ public struct Run: Decodable, Equatable, Sendable, Identifiable {
 
     public var id: String
     public var key: String
+    /// The ticket's title, recorded by the plugin once it read the ticket (`run-set --title`).
+    public var title: String?
     public var repo: String
     public var repoPath: String
     public var worktree: String?
@@ -75,7 +77,7 @@ public struct Run: Decodable, Equatable, Sendable, Identifiable {
     public var updatedAt: Date
 
     private enum CodingKeys: String, CodingKey {
-        case id, key, repo, worktree, branch, session, step, waiting, history, status
+        case id, key, title, repo, worktree, branch, session, step, waiting, history, status
         case repoPath = "repo_path"
         case sessionID = "session_id"
         case stepName = "step_name"
@@ -107,6 +109,7 @@ public struct Run: Decodable, Equatable, Sendable, Identifiable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         key = try container.decode(String.self, forKey: .key)
+        title = (try? container.decodeIfPresent(String.self, forKey: .title)) ?? nil
         repo = try container.decode(String.self, forKey: .repo)
         repoPath = try container.decode(String.self, forKey: .repoPath)
         worktree = try container.decodeIfPresent(String.self, forKey: .worktree)

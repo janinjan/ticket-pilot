@@ -22,7 +22,7 @@ import Testing
         let all = [Self.disk, Self.repos, Self.unreachable, Self.noToken, Self.plugin, Self.claude]
         #expect(SetupProblem.first(in: all) == SetupProblem(
             title: "Install Claude Code…",
-            headline: "Claude Code isn't installed yet",
+            explanation: "Install Claude Code to start a ticket.",
             action: .openURL(URL(string: "https://docs.claude.com/claude-code")!)
         ))
     }
@@ -31,7 +31,7 @@ import Testing
         let problem = SetupProblem.first(in: [Self.noToken, Self.plugin])
         #expect(problem == SetupProblem(
             title: "Install the Claude Code plugin…",
-            headline: "The Claude Code plugin isn't installed yet",
+            explanation: "Install the Claude Code plugin to start a ticket.",
             action: .installPlugin(.missing)
         ))
     }
@@ -40,7 +40,7 @@ import Testing
         let state = PluginState.outdated(installed: "0.1.2", bundled: "0.1.3")
         #expect(SetupProblem.first(in: [Self.outdated, Self.disk]) == SetupProblem(
             title: "Update the Claude Code plugin (0.1.2 → 0.1.3)…",
-            headline: "A newer Claude Code plugin is ready",
+            explanation: "A newer Claude Code plugin is ready to install.",
             action: .installPlugin(state)
         ))
         // An update can wait: what blocks a run comes first.
@@ -50,14 +50,14 @@ import Testing
 
     @Test func test_missingTokenConnectsJira() {
         let problem = SetupProblem.first(in: [Self.unreachable, Self.noToken])
-        #expect(problem == SetupProblem(title: "Connect Jira…", headline: "Jira isn't connected yet", action: .setJiraToken))
+        #expect(problem == SetupProblem(title: "Connect Jira…", explanation: "Connect Jira to see your tickets here.", action: .setJiraToken))
     }
 
     @Test func test_refusedKeychainExplainsItsFix() {
         let problem = SetupProblem.first(in: [Self.unreachable, Self.keychain])
         #expect(problem == SetupProblem(
             title: "Allow Keychain access…",
-            headline: "The Jira token can't be read",
+            explanation: "Allow Keychain access so TicketPilot can read your Jira token.",
             action: .explain(AlertText(title: "Keychain access", message: "Keychain refused\n\nAllow TicketPilot"))
         ))
     }
@@ -65,8 +65,8 @@ import Testing
     @Test func test_unreachableJiraChecksAgain() {
         let problem = SetupProblem.first(in: [Self.repos, Self.unreachable])
         #expect(problem == SetupProblem(
-            title: "Jira unreachable — check the network",
-            headline: "Jira can't be reached right now",
+            title: "Check again",
+            explanation: "Jira can't be reached right now. Check your network.",
             action: .checkAgain
         ))
         // A failed poll after a good check reads the same.
@@ -79,7 +79,7 @@ import Testing
         let problem = SetupProblem.first(in: [Self.disk, Self.repos])
         #expect(problem == SetupProblem(
             title: "Repository not found: ios, web…",
-            headline: "Some repositories weren't found",
+            explanation: "Some repositories weren't found. Check their paths in your config.",
             action: .explain(AlertText(
                 title: "Repository not found",
                 message: "Path not found for: ios, web\n\nCorrect the repo path in your config, then choose Check again."
@@ -91,14 +91,19 @@ import Testing
         let problem = SetupProblem.first(in: [Self.claude], configError: "not found at /c.json")
         #expect(problem == SetupProblem(
             title: "Fix the config…",
-            headline: "The config needs a fix",
+            explanation: "Fix your config to get started.",
             action: .explain(AlertText(title: "Config", message: "not found at /c.json"))
         ))
     }
 
     @Test func test_oneMissingRepoReadsInTheSingular() {
         let one = HealthCheck(id: .repoPaths, ok: false, detail: "Path not found for: ios", blockedRepos: ["ios"])
-        #expect(SetupProblem.first(in: [one])?.headline == "A repository wasn't found")
+        #expect(SetupProblem.first(in: [one])?.explanation == "A repository wasn't found. Check its path in your config.")
+    }
+
+    @Test func test_theButtonEndsWithAnArrowInsteadOfAnEllipsis() {
+        #expect(SetupProblem(title: "Connect Jira…", explanation: "", action: .setJiraToken).buttonTitle == "Connect Jira →")
+        #expect(SetupProblem(title: "Check again", explanation: "", action: .checkAgain).buttonTitle == "Check again →")
     }
 
     @Test func test_warningsAndPassingChecksAreNoProblem() {

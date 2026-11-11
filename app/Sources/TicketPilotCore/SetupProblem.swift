@@ -18,14 +18,19 @@ public struct SetupProblem: Equatable, Sendable {
 
     /// The button that fixes it ("Connect Jira…").
     public var title: String
-    /// A calm sentence saying what is missing, for the panel's headline ("Jira isn't connected yet").
-    public var headline: String
+    /// Why the panel says "Almost there!", and what the button gets ("Connect Jira to see your tickets here.").
+    public var explanation: String
     public var action: Action
 
-    public init(title: String, headline: String, action: Action) {
+    public init(title: String, explanation: String, action: Action) {
         self.title = title
-        self.headline = headline
+        self.explanation = explanation
         self.action = action
+    }
+
+    /// The panel's button: the title with an arrow instead of an ellipsis ("Connect Jira →").
+    public var buttonTitle: String {
+        (title.hasSuffix("…") ? String(title.dropLast()) : title) + " →"
     }
 
     static let claudeCodeURL = URL(string: "https://docs.claude.com/claude-code")!
@@ -39,7 +44,7 @@ public struct SetupProblem: Equatable, Sendable {
         if let configError {
             return SetupProblem(
                 title: "Fix the config…",
-                headline: "The config needs a fix",
+                explanation: "Fix your config to get started.",
                 action: .explain(AlertText(title: "Config", message: configError))
             )
         }
@@ -48,39 +53,41 @@ public struct SetupProblem: Equatable, Sendable {
         }
         if failed(.claudeCLI) != nil {
             return SetupProblem(
-                title: "Install Claude Code…", headline: "Claude Code isn't installed yet", action: .openURL(claudeCodeURL)
+                title: "Install Claude Code…", explanation: "Install Claude Code to start a ticket.", action: .openURL(claudeCodeURL)
             )
         }
         let plugin = failed(.plugin)?.pluginState
         if plugin == .missing {
             return SetupProblem(
                 title: "Install the Claude Code plugin…",
-                headline: "The Claude Code plugin isn't installed yet",
+                explanation: "Install the Claude Code plugin to start a ticket.",
                 action: .installPlugin(.missing)
             )
         }
         if let token = failed(.jiraToken) {
             if token.needsToken {
-                return SetupProblem(title: "Connect Jira…", headline: "Jira isn't connected yet", action: .setJiraToken)
+                return SetupProblem(title: "Connect Jira…", explanation: "Connect Jira to see your tickets here.", action: .setJiraToken)
             }
             let message = [token.detail, token.fix].compactMap { $0 }.joined(separator: "\n\n")
             return SetupProblem(
                 title: "Allow Keychain access…",
-                headline: "The Jira token can't be read",
+                explanation: "Allow Keychain access so TicketPilot can read your Jira token.",
                 action: .explain(AlertText(title: "Keychain access", message: message))
             )
         }
         if failed(.jiraReachable) != nil || (jiraFailing && !checks.isEmpty) {
             return SetupProblem(
-                title: "Jira unreachable — check the network",
-                headline: "Jira can't be reached right now",
+                title: "Check again",
+                explanation: "Jira can't be reached right now. Check your network.",
                 action: .checkAgain
             )
         }
         if let repos = failed(.repoPaths) {
             return SetupProblem(
                 title: "Repository not found: \(repos.blockedRepos.joined(separator: ", "))…",
-                headline: repos.blockedRepos.count == 1 ? "A repository wasn't found" : "Some repositories weren't found",
+                explanation: repos.blockedRepos.count == 1
+                    ? "A repository wasn't found. Check its path in your config."
+                    : "Some repositories weren't found. Check their paths in your config.",
                 action: .explain(AlertText(
                     title: "Repository not found",
                     message: repos.detail + "\n\nCorrect the repo path in your config, then choose Check again."
@@ -90,7 +97,7 @@ public struct SetupProblem: Equatable, Sendable {
         if let plugin, case let .outdated(installed, bundled) = plugin {
             return SetupProblem(
                 title: "Update the Claude Code plugin (\(installed) → \(bundled))…",
-                headline: "A newer Claude Code plugin is ready",
+                explanation: "A newer Claude Code plugin is ready to install.",
                 action: .installPlugin(plugin)
             )
         }

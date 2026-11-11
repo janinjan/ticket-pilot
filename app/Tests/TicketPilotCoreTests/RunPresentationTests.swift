@@ -61,14 +61,17 @@ import Testing
     }
 
     @Test func test_inProgressLineShowsTheStepAndItsDuration() {
-        let line = RunLine.make(Self.run(), now: Self.now, stuckMinutes: [:])
+        let line = RunLine.make(Self.run(), now: Self.now, stuckMinutes: [:], summary: "Show the distance")
         #expect(line.runID == "ABC-1--ios")
         #expect(line.section == .inProgress)
         #expect(line.name == "ABC-1")
+        #expect(line.title == "Show the distance")
+        #expect(line.context == "ABC-1 · iOS · In progress")
         #expect(line.detail == "Verifying · 12 min")
 
         let long = RunLine.make(Self.run(startedMinutesAgo: 65), now: Self.now, stuckMinutes: ["verify": 90])
         #expect(long.detail == "Verifying · 1 h 05")
+        #expect(long.title == "ABC-1")
 
         let fallback = RunLine.make(Self.run(startedMinutesAgo: nil), now: Self.now, stuckMinutes: [:])
         #expect(fallback.detail == "Verifying · 0 min")
@@ -79,29 +82,67 @@ import Testing
         #expect(stuck.isStuck)
     }
 
-    @Test func test_needsYouLineShowsTheQuestionOrTheKindFallback() {
+    @Test func test_needsYouLineSaysWhatTheRunWaitsFor() {
         var run = Self.run(status: .waiting, waitingMinutesAgo: 5)
         run.waiting?.text = "Which layout?"
-        #expect(RunLine.make(run, now: Self.now, stuckMinutes: [:]).detail == "Which layout?")
-        #expect(RunLine.make(run, now: Self.now, stuckMinutes: [:]).section == .needsYou)
+        let line = RunLine.make(run, now: Self.now, stuckMinutes: [:])
+        #expect(line.detail == "Waiting for your answer: Which layout?")
+        // Without a title of its own, the key is the title and is not repeated below it.
+        #expect(line.title == "ABC-1")
+        #expect(line.context == "iOS · Needs you")
+        #expect(line.section == .needsYou)
+        run.waiting = Run.Waiting(kind: "go", text: "Summary, and the JIRA line?", since: Self.now)
+        #expect(RunLine.make(run, now: Self.now, stuckMinutes: [:]).detail == "Summary, and the JIRA line?")
         let fallbacks = [
-            "go": "Waiting for your go", "launch_app": "Launch the app",
-            "input": "Waiting for your input", "question": "Waiting for you",
+            "go": "Waiting for your go.", "launch_app": "Launch the app.",
+            "input": "Waiting for your input.", "question": "Waiting for you.",
         ]
         for (kind, text) in fallbacks {
             run.waiting = Run.Waiting(kind: kind, text: "", since: Self.now)
             #expect(RunLine.make(run, now: Self.now, stuckMinutes: [:]).detail == text)
         }
         run.waiting = nil
-        #expect(RunLine.make(run, now: Self.now, stuckMinutes: [:]).detail == "Waiting for you")
+        #expect(RunLine.make(run, now: Self.now, stuckMinutes: [:]).detail == "Waiting for you.")
     }
 
-    @Test func test_reportReadyLineShowsDoneAndTheTimeSinceTheLastUpdate() {
+    @Test func test_reportReadyLineSaysSoWithoutATime() {
         var run = Self.run(status: .done)
         run.updatedAt = Self.now.addingTimeInterval(-36 * 60)
         let line = RunLine.make(run, now: Self.now, stuckMinutes: [:])
         #expect(line.section == .reportReady)
-        #expect(line.detail == "Done · 36 min")
+        #expect(line.detail == "Ready for review")
+        #expect(RunLine.make(run, now: Self.now, stuckMinutes: [:], commits: 1).detail == "1 commit ready for review")
+        #expect(RunLine.make(run, now: Self.now, stuckMinutes: [:], commits: 4).detail == "4 commits ready for review")
+        // A finished run gives no time: it no longer matters.
+        #expect(line.context == "iOS · Done")
+        let titled = RunLine.make(run, now: Self.now, stuckMinutes: [:], summary: "Show the distance")
+        #expect(titled.context == "ABC-1 · iOS · Done")
+    }
+
+    @Test func test_theSessionButtonSaysWhatTheRunNeeds() {
+        let live = Run.SessionInfo(state: "running", lastNotification: nil, notifiedAt: nil)
+        func button(_ status: Run.Status, session: Run.SessionInfo?, sessionID: String? = "s1") -> String {
+            var run = Self.run(status: status, waitingMinutesAgo: status == .waiting ? 1 : nil)
+            run.sessionID = sessionID
+            run.session = session
+            return RunLine.make(run, now: Self.now, stuckMinutes: [:]).sessionButton
+        }
+        #expect(button(.waiting, session: live) == "Answer")
+        #expect(button(.running, session: live) == "Follow")
+        #expect(button(.unknown, session: live) == "Follow")
+        #expect(button(.done, session: live) == "Read the report")
+        // A closed session, or none at all, reads "Resume" while the run is not done.
+        let ended = Run.SessionInfo(state: "ended", lastNotification: nil, notifiedAt: nil)
+        #expect(button(.waiting, session: ended) == "Resume")
+        #expect(button(.running, session: nil, sessionID: nil) == "Resume")
+        // A finished run's session is resumed too, but reading the report is what the user wants.
+        #expect(button(.done, session: ended) == "Read the report")
+        #expect(button(.done, session: nil, sessionID: nil) == "Read the report")
+    }
+
+    @Test func test_notificationsOfferTheSameButton() {
+        #expect(SessionButton.title(for: .waiting(runID: "r", key: "ABC-1", kind: "go", text: "")) == "Answer")
+        #expect(SessionButton.title(for: .reportReady(runID: "r", key: "ABC-1")) == "Read the report")
     }
 
     @Test func test_stuckUsesDefaultsAndOverrides() {
@@ -139,8 +180,9 @@ import Testing
         android.repo = "android"
         ios.updatedAt = Self.now
         android.updatedAt = Self.now.addingTimeInterval(-60)
-        let names = RunGroup.make(runs: [ios, android], now: Self.now, stuckMinutes: [:])[0].lines.map(\.name)
-        #expect(names == ["ABC-1 · ios", "ABC-1 · android"])
+        let lines = RunGroup.make(runs: [ios, android], now: Self.now, stuckMinutes: [:], summaries: ["ABC-1": "Map"])[0].lines
+        #expect(lines.map(\.name) == ["ABC-1 · iOS", "ABC-1 · Android"])
+        #expect(lines.map(\.title) == ["Map", "Map"])
     }
 
     @Test func test_progressFillsTheDotsUpToTheCurrentStepOfRunsNotDone() {
@@ -168,6 +210,8 @@ import Testing
         let size = ByteCountFormatter.string(fromByteCount: 5_000_000, countStyle: .file)
         #expect(RunLine.showInFinderTitle(run, bytes: 5_000_000) == "Show in Finder · \(size)")
         #expect(RunLine.showInFinderTitle(run, bytes: nil) == "Show in Finder")
+        #expect(RunLine.sizeLabel(bytes: 5_000_000) == size)
+        #expect(RunLine.sizeLabel(bytes: nil) == nil)
     }
 
     @Test func test_menuBarIconShowsWhatNeedsYouAndSetupProblems() {

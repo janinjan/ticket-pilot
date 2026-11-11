@@ -14,7 +14,9 @@ enum NotificationAction: Sendable {
 struct Notifier {
     private enum ID {
         static let ticketCategory = "ticket"
-        static let runCategory = "run"
+        /// One category per button title: a category's actions are fixed.
+        static let answerCategory = "run-answer"
+        static let reportCategory = "run-report"
         static let start = "start"
         static let openInJira = "open-in-jira"
         static let openSession = "open-session"
@@ -37,14 +39,17 @@ struct Notifier {
                 ],
                 intentIdentifiers: []
             ),
-            UNNotificationCategory(
-                identifier: ID.runCategory,
-                actions: [
-                    UNNotificationAction(identifier: ID.openSession, title: "Open session", options: [.foreground]),
-                ],
-                intentIdentifiers: []
-            ),
+            Self.runCategory(ID.answerCategory, button: SessionButton.title(for: .waiting(runID: "", key: "", kind: "", text: ""))),
+            Self.runCategory(ID.reportCategory, button: SessionButton.title(for: .reportReady(runID: "", key: ""))),
         ])
+    }
+
+    private static func runCategory(_ identifier: String, button: String) -> UNNotificationCategory {
+        UNNotificationCategory(
+            identifier: identifier,
+            actions: [UNNotificationAction(identifier: ID.openSession, title: button, options: [.foreground])],
+            intentIdentifiers: []
+        )
     }
 
     func requestAuthorization() {
@@ -66,7 +71,10 @@ struct Notifier {
         let content = UNMutableNotificationContent()
         content.title = text.title
         content.body = text.body
-        content.categoryIdentifier = ID.runCategory
+        content.categoryIdentifier = switch event {
+        case .waiting: ID.answerCategory
+        case .reportReady: ID.reportCategory
+        }
         content.userInfo = [ID.runID: event.runID]
         post(content, identifier: identifier)
     }
