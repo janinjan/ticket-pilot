@@ -10,7 +10,12 @@ The ticket key `<KEY>` is the first word of `$ARGUMENTS`, in uppercase. If `$ARG
 
 Session tracking only works when the skill is invoked as `/ticket-pilot:start <KEY>`, with the key in uppercase right after the command; if the user started it another way, tell them so.
 
-This file is written in English. Talk to the user, and write the final report, in the user's language.
+This file is written in English, but **you write to the user only in the language decided at the start** (see below). Language rule, checked before every message:
+
+- Decide the user's language once, at the start: the language instructions of the user's own instructions (CLAUDE.md, memory) win; otherwise the language of the user's messages. Keep it for the whole run.
+- Every sentence the user sees is in that language and register (if the user says "tu", say "tu"): one-line progress narration between tool calls, questions, summaries, tables, the test plan and the final report. No English sentence, not even a short "Checking the build".
+- Agent and tool outputs often come back in English: translate what you show, never paste or echo their English.
+- Code, commands, file paths, identifiers and quoted error messages stay as they are.
 
 ## Absolute rule
 
@@ -46,7 +51,7 @@ Each of these makes the run a failure, whatever the result:
 
 **The worktree.** Bash `cd` outside the session's working directory may not persist between calls. Every command for the worktree is either `cd "<worktree>" && …` in the same call or `git -C "<worktree>" …`. Every file edit uses an absolute path inside the worktree. Never edit the main checkout.
 
-**Questions.** Ask only for decisions that change what gets built: a real divergence between sources, a real ambiguity, a conflict between the design and the ticket. One question at a time, always with your recommendation. Before asking, record it: `"<plugin-root>/bin/tp" run-wait <id> question "<the question>"`. Then wait for the answer.
+**Questions.** Ask only for decisions that change what gets built: a real divergence between sources, a real ambiguity, a conflict between the design and the ticket. One question at a time, always with your recommendation. Every question to the user (the go, a divergence, a branch reference, launching the app, any choice) is recorded first with `"<plugin-root>/bin/tp" run-wait <id> <kind> "<the question text, in the user's language>"`, the text of the question itself, never an empty text; the steps below repeat it where it applies. Then wait for the answer.
 
 **Proof.** Every claim you make, during the run and in the report, comes with its proof: `path:line`, the command and its output, or a link. If you cannot prove it, say so and mark it ❓.
 
@@ -58,8 +63,8 @@ Each of these makes the run a failure, whatever the result:
    - Unknown run (exit code 2): run `"<plugin-root>/bin/tp" run-start <KEY> <repo-name> "<main repo root>"`. It prints the run id (`<KEY>--<repo-name>`). Keep it: it is the `<id>` of every later `tp run-*` call.
    - Existing run with `status` `done`: tell the user the run is finished and offer to show its report again. Do not start over. If they say yes, repeat the report if this session still has it; otherwise rebuild it from the run state and the branch (`git -C "<worktree>" log --oneline <base>..HEAD`), marking ❓ what you cannot prove again.
    - Existing run not done: tell the user at which step it stopped (`step`, `step_name`, `waiting`) and offer to resume there. Never restart silently, never restart without a yes. See Resume below.
-4. Create the checklist with TaskCreate: one task per step, `Step 1 — Understand` to `Step 10 — Report`. Every step is mandatory.
-   - Before starting step N, run `"<plugin-root>/bin/tp" run-step <id> N` and mark the task in progress.
+4. Create the checklist with TaskCreate: one task per step, `Step 1 — Understand` to `Step 10 — Report`. Every step is mandatory. When the task tool is not available, do not mention it to the user: track progress with `run-step` only.
+   - Before starting step N, run `"<plugin-root>/bin/tp" run-step <id> N` and mark the task in progress when the checklist exists.
    - A step that does not apply is still started with `run-step`, then checked as "not applicable" with its reason (for example "no user interface change: nothing to launch"). Never skip a step silently.
 
 ## Step 1 — Understand
@@ -73,8 +78,8 @@ Run `"<plugin-root>/bin/tp" run-step <id> 1`.
 2. Read **every** Confluence page linked from the ticket, images included, every Figma link, and every linked Slack thread. If a source cannot be read (missing tool, no access), list it as unread; never guess its content.
 3. Write the **numbered list of requests**: one request per number, each with its source (ticket description, comment, Confluence page, Figma frame…).
 4. Present to the user: a short summary, the numbered requests, the target repo, and the ambiguous points.
-5. Ask in the same message: **"Add `JIRA: <KEY>` to the commits?"** The line is never added without a yes.
-6. Record the wait, then wait: `"<plugin-root>/bin/tp" run-wait <id> go "<one-line summary and the JIRA: question>"`. This go is the only systematic validation of the run. Nothing else starts before it.
+5. Ask in the same message, in the user's language, whether to add the line `JIRA: <KEY>` to the commits. The line is never added without a yes.
+6. Record the wait, then wait: `"<plugin-root>/bin/tp" run-wait <id> go "<in the user's language: one-line summary + the question about the JIRA line>"`. This go is the only systematic validation of the run. Nothing else starts before it.
 7. On the go, record the answer: `"<plugin-root>/bin/tp" run-set <id> --jira-line yes` or `--jira-line no`.
 
 ## Step 2 — Prepare
@@ -85,7 +90,7 @@ Run `"<plugin-root>/bin/tp" run-step <id> 2`.
 2. Choose a branch name: a short descriptive slug of the change, in kebab-case, **without the ticket number** (for example `show-delivery-distance`).
 3. Create a dedicated worktree at `<repo-path>-worktrees/<slug>` (sibling of the repo; avoid spaces in the path), always from the up-to-date remote main branch: `git -C "<repo>" worktree add --no-track -b <slug> "<worktree>" origin/<main_branch>`.
    - If that path or branch already exists and belongs to this run (the run's recorded `branch` is `<slug>`, or the path equals the run's recorded `worktree`), reuse it: do not create it again.
-   - If it belongs to something else, never touch it: propose another slug as a question, `"<plugin-root>/bin/tp" run-wait <id> question "<slug> is taken; use <other-slug>?"`, and wait for the answer.
+   - If it belongs to something else, never touch it: propose another slug as a question, `"<plugin-root>/bin/tp" run-wait <id> question "<in the user's language: slug X is taken, use slug Y? + recommendation>"`, and wait for the answer.
 4. Note the base commit: `git -C "<worktree>" merge-base HEAD origin/<main_branch>`. It is `<base>` in every later step.
 5. Record it: `"<plugin-root>/bin/tp" run-set <id> --worktree "<worktree>" --branch <slug>`.
 6. Set up the worktree: `cd "<worktree>" && <setup_command>`, or the repo's own build skill when it handles project generation itself.
@@ -95,7 +100,7 @@ Run `"<plugin-root>/bin/tp" run-step <id> 2`.
 
 Run `"<plugin-root>/bin/tp" run-step <id> 3`.
 
-Launch **six read-only exploration agents in parallel**, in a single message (for example the `Explore` agent type), one per research item below. Give each one: the ticket key and title, the numbered requests, the worktree path, the relevant config entries, the absolute rule (nothing visible to others without an explicit yes: no comment, no vote, no Jira or wiki change, no message, nothing that changes a shared system), and the instruction to stay read-only and to return every finding with its proof (`path:line`, link, command).
+Launch **six read-only exploration agents in parallel**, in a single message (for example the `Explore` agent type), one per research item below. Give each one: the ticket key and title, the numbered requests, the worktree path, the relevant config entries, the absolute rule (nothing visible to others without an explicit yes: no comment, no vote, no Jira or wiki change, no message, nothing that changes a shared system), the instruction to stay read-only and to return every finding with its proof (`path:line`, link, command), and the language rule: write the report in the user's language (the one decided at the start), so that nothing in English reaches the user.
 
 1. **Twin tickets** on the other platforms: search Jira for the ticket title without its platform prefix (the `match.title_prefixes` of every repo in the config). Read their descriptions: they often differ.
 2. **The other platforms' implementation, where it really is**. The agents run in parallel, so this agent finds the twin tickets itself (same search as item 1), then, depending on each twin's status:
@@ -115,7 +120,7 @@ Launch **six read-only exploration agents in parallel**, in a single message (fo
 
 If an agent finds no implementation on a platform, rerun the sync for that repo yourself (its `sync_command`, else `git -C "<repo>" fetch origin`), then search `origin/<main_branch>` again before concluding "not started".
 
-If item 6 finds a candidate branch, record it and ask ONE question, with your recommendation: `"<plugin-root>/bin/tp" run-wait <id> question "Is branch <branch> (<repo>, last commit <date>) the reference for this ticket? Recommendation: <yes or no, and why>"`, then wait for the answer. If yes, that branch is the **primary reference**: compare against it in step 4 and reuse its logic and design rather than re-inventing them.
+If item 6 finds a candidate branch, record it and ask ONE question, with your recommendation: `"<plugin-root>/bin/tp" run-wait <id> question "<in the user's language: is branch X (repo, last commit date) the reference for this ticket? + recommendation, yes or no and why>"`, then wait for the answer. If yes, that branch is the **primary reference**: compare against it in step 4 and reuse its logic and design rather than re-inventing them.
 
 ## Step 4 — Compare and decide
 
@@ -127,7 +132,7 @@ Run `"<plugin-root>/bin/tp" run-step <id> 4`.
    |---|---|---|---|---|---|
 
    The platform columns are examples: use the platforms that exist for this ticket. When step 3 found a local work-in-progress branch, add a **Local branch** column for it (marked local, not merged); when the user chose it as the reference, it is the primary reference of the table. Every cell carries its proof.
-2. Ask **one question per real divergence** of behaviour, scope or data, with your recommendation, recorded first with `"<plugin-root>/bin/tp" run-wait <id> question "<divergence and recommendation>"`. Differences imposed by the platform itself do not count.
+2. Ask **one question per real divergence** of behaviour, scope or data, with your recommendation, recorded first with `"<plugin-root>/bin/tp" run-wait <id> question "<in the user's language: the divergence + recommendation>"`. Differences imposed by the platform itself do not count.
 3. Only one reference found → follow it, and say so.
 4. No reference at all (the target platform is the first) → **carry on**: build the spec from the ticket, the twins, the backend, the precedents and the design; take the decisions yourself and list them for the report; ask only on a real product ambiguity.
 5. Reproduce the **behaviour**, not the code structure of the other platforms.
@@ -166,7 +171,7 @@ This step is "not applicable" only when the change has no effect visible in the 
 For the whole step: once the app runs on a device, simulator or browser that the user launched (or said is ready), never install, reinstall, rebuild or relaunch it there without an explicit yes for that exact action. A short or ambiguous reply ("ok", "done") to a question that offered several actions means ready, not permission to act. When in doubt, ask again in one sentence.
 
 1. Try to build and launch the app (simulator, emulator or browser) with the repo entry's `launch_skill`, or the repo's own launch skill if it has one.
-2. If that fails, do not tinker. Ask the user to launch the app, with the toggle state you need, and wait: `"<plugin-root>/bin/tp" run-wait <id> launch_app "<what to launch and with which toggle state>"`.
+2. If that fails, do not tinker. Ask the user to launch the app, with the toggle state you need, and wait: `"<plugin-root>/bin/tp" run-wait <id> launch_app "<in the user's language: what to launch and with which toggle state>"`.
    - Toggles: never edit generated or shipped config files to flip a toggle. Ask the user to set it in the app's debug menu.
 3. **Proxy state**, before running the cases, when a debugging proxy is in use: list the proxy's active rules (rewrite, scripting, breakpoint, map rules). Report every rule that alters requests or responses; before disabling one, ask with `"<plugin-root>/bin/tp" run-wait <id> question "<in the user's language: may I disable rule X, which alters Y? + recommendation>"` and wait for the answer. Never leave a rule you enabled active. The test plan states that real (unaltered) traffic was used, or which rule altered it.
 4. Once the app runs, drive it:
@@ -244,7 +249,7 @@ End the report with the command the user runs to send the branch, chosen by the 
 The run state lives in the ticket-pilot state directory (`runs/<id>.json`): current step, worktree, branch, `jira_line`. When the user accepts to resume an unfinished run:
 
 1. Read it with `"<plugin-root>/bin/tp" run-show <id>`. Check that the worktree and branch still exist only if they are recorded (a run stopped at step 1 or 2 may have none yet). If a recorded one is gone, tell the user and stop.
-2. Recreate the checklist: steps before `step` are done (from `history`), the others are pending.
+2. Recreate the checklist when the task tool is available: steps before `step` are done (from `history`), the others are pending.
 3. If a worktree is recorded and the run resumes at step 3 or later, recompute `<base>` exactly as in step 2 point 4: `git -C "<worktree>" merge-base HEAD origin/<main_branch>`. Every later step uses this value.
 4. Read the ticket again and rebuild the numbered list of requests (step 1 points 1 to 3). Ask for the go again only if the ticket changed in a way that changes the requests, or if the run stopped at step 1 before the go; keep the recorded `jira_line`.
 5. Tell the user you resume step `step` from its beginning, then restart it with `run-step` and carry on from there. A pending question of that step is asked again as the step reaches it.

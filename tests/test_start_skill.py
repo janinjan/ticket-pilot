@@ -210,7 +210,7 @@ class StartSkillTests(unittest.TestCase):
         self.assertIn("branch names", section)
         self.assertIn("Exclude the run's own branch", section)
         self.assertIn("nothing reads", section)
-        self.assertRegex(section, r'tp"? run-wait <id> question "Is branch')
+        self.assertRegex(section, r'tp"? run-wait <id> question "<in the user\'s language: is branch')
         self.assertIn("primary reference", section)
         self.assertIn("not as merged", section)
 
@@ -232,6 +232,45 @@ class StartSkillTests(unittest.TestCase):
         self.assertIn("Never leave a rule you enabled active", section)
         plan = read(os.path.join(SKILL_DIR, "references", "test-plan-format.md"))
         self.assertIn("real (unaltered) traffic", plan)
+
+    def test_user_language_and_register_everywhere(self):
+        text = skill()
+        head = text[:text.index("## Absolute rule")]
+        self.assertIn("only in the language decided at the start", head)
+        self.assertIn("language and register", head)
+        self.assertIn("progress narration", head)
+        self.assertIn("never paste or echo their English", head)
+        self.assertIn("CLAUDE.md, memory", head)
+        self.assertIn("write the report in the user's language", step_sections(text)[3])
+
+    def test_checklist_tool_fallback_is_silent(self):
+        text = skill()
+        startup = text[text.index("## Start-up"):text.index("## Step 1 — ")]
+        self.assertIn("When the task tool is not available", startup)
+        self.assertIn("do not mention it to the user", startup)
+        self.assertIn("`run-step` only", startup)
+
+    def test_every_question_is_recorded_with_its_text(self):
+        text = skill()
+        head = text[:text.index("## Start-up")]
+        self.assertIn("Every question to the user", head)
+        self.assertIn('tp" run-wait <id> <kind> "<the question text, in the user\'s language>"', head)
+        self.assertIn("never an empty text", head)
+
+    def test_question_templates_are_in_the_user_language(self):
+        text = skill()
+        templates = re.findall(r'tp"? run-wait <id> (\w+) "([^"]*)"', text)
+        self.assertGreaterEqual(len(templates), 6)
+        for kind, template in templates:
+            with self.subTest(kind=kind, template=template):
+                self.assertTrue(template.startswith("<"), "template must be a placeholder")
+                self.assertIn("in the user's language", template)
+        self.assertNotIn("to the commits?", text)
+        self.assertNotIn("is taken; use", text)
+
+    def test_resume_checklist_only_with_the_task_tool(self):
+        resume = skill()[skill().index("## Resume"):]
+        self.assertIn("Recreate the checklist when the task tool is available", resume)
 
     def test_report_has_a_coverage_list(self):
         text = skill()
