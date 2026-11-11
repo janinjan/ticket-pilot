@@ -344,6 +344,11 @@ class StartSkillTests(unittest.TestCase):
         section = step_sections(skill())[9]
         self.assertIn("Never a generic word", section)
 
+    def test_unread_sources_are_asked_not_guessed(self):
+        section = step_sections(skill())[1]
+        self.assertIn("never guess its content, not even from the description", section)
+        self.assertIn("ask the user to paste each unread source", section)
+
     def test_report_has_a_coverage_list(self):
         text = skill()
         self.assertIn("Coverage", step_sections(text)[7])

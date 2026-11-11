@@ -80,7 +80,7 @@ Run `"<plugin-root>/bin/tp" run-step <id> 1`.
    - attachments, linked tickets, the parent epic.
 
    Record the ticket's title, as written in Jira, for the menu bar app: `"<plugin-root>/bin/tp" run-set <id> --title "<title>"`.
-2. Read **every** Confluence page linked from the ticket, images included, every Figma link, and every linked Slack thread. If a source cannot be read (missing tool, no access), list it as unread; never guess its content.
+2. Read **every** Confluence page linked from the ticket, images included, every Figma link, and every linked Slack thread. If a source cannot be read (missing tool, no access, an attachment the tools cannot download), list it as unread; never guess its content, not even from the description. In the message of point 4, ask the user to paste each unread source the user can provide (an attachment, an image, a private page) or to say it can be ignored; until then, the requests it may touch are marked ❓.
 3. Write the **numbered list of requests**: one request per number, each with its source (ticket description, comment, Confluence page, Figma frame…). Record it, in order, one flag per request: `"<plugin-root>/bin/tp" run-set <id> --request "<1. request — source>" --request "<2. …>"`. Record it again whenever the list changes (an answer of the user, a resume).
 4. Present to the user: a short summary, the numbered requests, the target repo, and the ambiguous points.
 5. Ask in the same message, in the user's language, whether to add the line `JIRA: <KEY>` to the commits. The line is never added without a yes.
