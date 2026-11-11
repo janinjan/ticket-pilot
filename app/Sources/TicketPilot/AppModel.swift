@@ -47,6 +47,11 @@ final class AppModel {
     private(set) var jiraAccount: String?
     /// From "Connect Jira" until the browser came back, or the sign-in was cancelled.
     private(set) var signingIn = false
+    /// The Keychain refused access, and a check made after that still found it refused: the panel then
+    /// offers to reset the Jira sign-in.
+    private(set) var keychainRechecked = false
+    /// "Check again" was chosen for a Keychain refusal: the check under way counts as that recheck.
+    @ObservationIgnored private var keychainRecheckPending = false
 
     /// `UNUserNotificationCenter` and `SMAppService` need a `.app` bundle.
     let hasBundle = Bundle.main.bundleIdentifier != nil
@@ -57,7 +62,9 @@ final class AppModel {
 
     /// The problem the panel offers to fix, if any.
     var setupProblem: SetupProblem? {
-        SetupProblem.first(in: health, configError: configError, jiraFailing: jiraFailing)
+        SetupProblem.first(
+            in: health, configError: configError, jiraFailing: jiraFailing, keychainRechecked: keychainRechecked
+        )
     }
 
     /// The setup button: "Copied ✓" for a few seconds once its fix command is copied.
@@ -67,15 +74,15 @@ final class AppModel {
         return setupProblem.buttonTitle
     }
 
-    /// The headline under the panel's mark.
-    var status: PanelStatus {
-        PanelStatus.make(
-            runs: runs,
-            acknowledgedDone: acknowledged,
-            setupProblem: setupProblem,
-            todoCount: jiraAnswered ? todo.ready.count + todo.backlog.count : nil,
-            summaries: summaries,
-            signingIn: signingIn
+    /// The status at the top of the panel, only when the user must act.
+    var status: PanelStatus? {
+        PanelStatus.make(runs: runs, setupProblem: setupProblem, signingIn: signingIn)
+    }
+
+    /// What the empty list says ("No tickets assigned to you"), once Jira answered.
+    var emptyListText: String? {
+        PanelStatus.emptyListText(
+            hasRuns: !runs.isEmpty, todoCount: jiraAnswered ? todo.ready.count + todo.backlog.count : nil
         )
     }
 
@@ -176,18 +183,23 @@ final class AppModel {
         doctorTask = Task { [weak self] in
             let token: Result<String, KeychainError>
             let jira: (any JiraSearching)?
-            switch config.jira.auth {
-            case .apiToken:
-                token = await Task.detached {
-                    Result<String, KeychainError> { () throws(KeychainError) in try Keychain.password(service: service) }
-                }.value
-                jira = (try? token.get()).map {
-                    JiraClient(site: config.jira.site, email: config.jira.email, token: $0)
-                }
-            case .mcp:
-                token = await Self.atlassianSignIn(auth)
-                jira = (try? token.get()).map { _ in
-                    MCPJiraClient(site: config.jira.site, tools: MCPClient(url: auth.server, tokens: auth, clientVersion: Self.version))
+            if let count = DebugFlags.current.fakeTicketCount {
+                token = .success("debug")
+                jira = DebugJira(count: count)
+            } else {
+                switch config.jira.auth {
+                case .apiToken:
+                    token = await Task.detached {
+                        Result<String, KeychainError> { () throws(KeychainError) in try Keychain.password(service: service) }
+                    }.value
+                    jira = (try? token.get()).map {
+                        JiraClient(site: config.jira.site, email: config.jira.email, token: $0)
+                    }
+                case .mcp:
+                    token = await Self.atlassianSignIn(auth)
+                    jira = (try? token.get()).map { _ in
+                        MCPJiraClient(site: config.jira.site, tools: MCPClient(url: auth.server, tokens: auth, clientVersion: Self.version))
+                    }
                 }
             }
             guard !Task.isCancelled, let self else { return }
@@ -211,6 +223,9 @@ final class AppModel {
             let checks = await Task.detached { await doctor.run() }.value
             guard !Task.isCancelled else { return }
             health = checks
+            let refused = SetupProblem.first(in: checks)?.action == .recheckKeychain
+            keychainRechecked = refused && (keychainRechecked || keychainRecheckPending)
+            keychainRecheckPending = false
             if let mcp = jira as? MCPJiraClient, checks.contains(where: { $0.id == .jiraSignIn && $0.ok }) {
                 let email = try? await mcp.accountEmail()
                 guard !Task.isCancelled else { return }
@@ -649,8 +664,11 @@ final class AppModel {
         aboutWindow.show(title: "About TicketPilot") { AboutView() }
     }
 
+    /// Where Send feedback leads, until the feedback window exists.
+    private static let issuesURL = URL(string: "https://github.com/janinjan/ticket-pilot/issues")!
+
     func sendFeedback() {
-        NSWorkspace.shared.open(AboutView.issuesURL)
+        NSWorkspace.shared.open(Self.issuesURL)
     }
 
     /// Writes `terminal_app` into the config (nil removes it, for "Automatic"), every other key kept.
@@ -701,7 +719,40 @@ final class AppModel {
         case .connectAtlassian: connectAtlassian()
         case let .explain(text): Alerts.show(text)
         case .checkAgain: runDoctor()
+        case .recheckKeychain:
+            keychainRecheckPending = true
+            runDoctor()
+        case let .resetJiraSignIn(auth): resetJiraSignIn(auth)
         case let .installPlugin(state): installPlugin(state)
+        }
+    }
+
+    /// Deletes the app's Jira sign-in from the Keychain, after a confirmation, then connects Jira again:
+    /// asks for the API token, or opens the Atlassian sign-in.
+    func resetJiraSignIn(_ auth: JiraAuth) {
+        guard let config else { return }
+        let what = auth == .apiToken ? "Jira API token" : "Atlassian sign-in"
+        guard Alerts.confirm(AlertText(
+            title: "Reset the Jira sign-in?",
+            message: "TicketPilot deletes its \(what) from your Keychain, then connects Jira again."
+        ), button: "Reset") else { return }
+        cancelSignIn()
+        let service = config.jira.keychainService
+        let atlassian = atlassianAuth
+        Task { [weak self] in
+            switch auth {
+            case .apiToken: await Task.detached { Keychain.deleteItems(service: service) }.value
+            case .mcp: await atlassian.disconnect()
+            }
+            guard let self else { return }
+            keychainRechecked = false
+            keychainRecheckPending = false
+            jiraAccount = nil
+            runDoctor()
+            switch auth {
+            case .apiToken: setJiraToken()
+            case .mcp: connectAtlassian()
+            }
         }
     }
 

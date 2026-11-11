@@ -9,6 +9,7 @@ public enum KeychainError: Error, Equatable {
 public enum Keychain {
     /// Reads the generic password stored under `service`. Never logs or persists it.
     public static func password(service: String) throws(KeychainError) -> String {
+        guard !DebugFlags.current.skipsKeychain else { throw .notFound }
         let query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
@@ -35,6 +36,7 @@ public enum Keychain {
         label: String? = nil,
         thisDeviceOnly: Bool = false
     ) throws(KeychainError) {
+        guard !DebugFlags.current.skipsKeychain else { return }
         // Updates whichever account holds the item, so one stored under another account is replaced.
         let existing: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
@@ -55,6 +57,7 @@ public enum Keychain {
 
     /// Deletes the item of `service` and `account`; a missing item is not an error.
     static func deletePassword(service: String, account: String) {
+        guard !DebugFlags.current.skipsKeychain else { return }
         let query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
@@ -65,6 +68,7 @@ public enum Keychain {
 
     /// Deletes every item of `service`, whatever its account; a missing item is not an error.
     public static func deleteItems(service: String) {
+        guard !DebugFlags.current.skipsKeychain else { return }
         let query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,

@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import TicketPilotCore
 
-@Suite struct SetupProblemTests {
+@Suite(.timeLimit(.minutes(1))) struct SetupProblemTests {
     static let claude = HealthCheck(id: .claudeCLI, ok: false, detail: "Claude Code not found", fix: "Install", blocksStart: true)
     static let plugin = HealthCheck(
         id: .plugin, ok: false, detail: "not installed", fix: "claude plugin install x", blocksStart: true, pluginState: .missing
@@ -53,12 +53,20 @@ import Testing
         #expect(problem == SetupProblem(title: "Connect Jira…", explanation: "Connect Jira to see your tickets here.", action: .setJiraToken))
     }
 
-    @Test func test_refusedKeychainExplainsItsFix() {
-        let problem = SetupProblem.first(in: [Self.unreachable, Self.keychain])
-        #expect(problem == SetupProblem(
-            title: "Allow Keychain access…",
-            explanation: "Allow Keychain access so TicketPilot can read your Jira token.",
-            action: .explain(AlertText(title: "Keychain access", message: "Keychain refused\n\nAllow TicketPilot"))
+    @Test func test_refusedKeychainChecksAgainFirstThenOffersAReset() {
+        // The item may be gone, or allowed, by now: a new check comes first.
+        let first = SetupProblem.first(in: [Self.unreachable, Self.keychain])
+        #expect(first == SetupProblem(
+            title: "Check again",
+            explanation: "TicketPilot couldn't read your Jira token from the Keychain. It may work now.",
+            action: .recheckKeychain
+        ))
+        // Still refused after that check: start the sign-in afresh.
+        let again = SetupProblem.first(in: [Self.unreachable, Self.keychain], keychainRechecked: true)
+        #expect(again == SetupProblem(
+            title: "Reset Jira sign-in…",
+            explanation: "The Keychain still refuses access. Reset the Jira sign-in, then connect Jira again.",
+            action: .resetJiraSignIn(.apiToken)
         ))
     }
 
@@ -136,12 +144,13 @@ import Testing
         ))
     }
 
-    @Test func test_keychainRefusedForTheSignInExplainsItsFix() {
+    @Test func test_keychainRefusedForTheSignInChecksAgainThenOffersAReset() {
         let keychain = HealthCheck(id: .jiraSignIn, ok: false, detail: "Keychain refused", fix: "Allow TicketPilot", blocksStart: true)
         #expect(SetupProblem.first(in: [keychain]) == SetupProblem(
-            title: "Allow Keychain access…",
-            explanation: "Allow Keychain access so TicketPilot can read your Atlassian sign-in.",
-            action: .explain(AlertText(title: "Keychain access", message: "Keychain refused\n\nAllow TicketPilot"))
+            title: "Check again",
+            explanation: "TicketPilot couldn't read your Atlassian sign-in from the Keychain. It may work now.",
+            action: .recheckKeychain
         ))
+        #expect(SetupProblem.first(in: [keychain], keychainRechecked: true)?.action == .resetJiraSignIn(.mcp))
     }
 }

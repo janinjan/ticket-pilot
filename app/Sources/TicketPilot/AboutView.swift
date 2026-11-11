@@ -1,11 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// The About window: the app icon, the version, the copyright and the link to the source.
+/// The About window: the app icon, the name, the version, the copyright and the license. No links.
 struct AboutView: View {
-    static let sourceURL = URL(string: "https://github.com/janinjan/ticket-pilot")!
-    static let issuesURL = URL(string: "https://github.com/janinjan/ticket-pilot/issues")!
-
     private var version: String {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
         return version.map { "Version \($0)" } ?? "Development build"
@@ -30,9 +27,6 @@ struct AboutView: View {
             .font(.caption)
             .foregroundStyle(.secondary)
             .padding(.top, 6)
-            Link("Source on GitHub", destination: Self.sourceURL)
-                .font(.callout)
-                .padding(.top, 8)
         }
         .padding(.horizontal, 32)
         .padding(.vertical, 24)

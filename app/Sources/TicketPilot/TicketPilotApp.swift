@@ -28,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(500))
             self?.trackStatusButton()
+            DebugPanel.openIfAsked()
         }
     }
 

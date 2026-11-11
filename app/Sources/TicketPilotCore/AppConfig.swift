@@ -7,7 +7,7 @@ public enum ConfigError: Error, Equatable {
 
 /// How the app reads Jira: through the Atlassian Remote MCP server (OAuth sign-in), or the REST API with
 /// an API token.
-public enum JiraAuth: String, Decodable, Sendable {
+public enum JiraAuth: String, Decodable, Equatable, Sendable {
     case mcp
     case apiToken = "api_token"
 }

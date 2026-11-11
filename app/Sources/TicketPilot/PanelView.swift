@@ -16,23 +16,36 @@ struct PanelView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            top
-                .padding(.horizontal, 12)
-                .padding(.top, 4)
-                .padding(.bottom, 10)
-            if hasList {
+            if let status = model.status {
+                top(status)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 4)
+                    .padding(.bottom, 10)
                 Divider()
+            }
+            if hasList {
                 ScrollView {
                     list
                         .padding(12)
                         .onGeometryChange(for: CGFloat.self, of: \.size.height) { listHeight = $0 }
                 }
                 .frame(height: min(max(listHeight, 1), Self.maxListHeight))
+            } else if let empty = model.emptyListText {
+                Text(empty)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 20)
             }
             Divider()
             footer
         }
         .frame(width: 300)
+        // The panel takes its content's height, and its window follows it (`HostWindow.fit`).
+        .fixedSize(horizontal: false, vertical: true)
+        .onGeometryChange(for: CGFloat.self, of: \.size.height) { host.fit(contentHeight: $0) }
+        // Top-aligned, should the window be taller for a moment: never a gap under the menu bar.
+        .frame(maxHeight: .infinity, alignment: .top)
         .background(HostWindowReader(host: host))
     }
 
@@ -82,7 +95,7 @@ struct PanelView: View {
         }
         .padding(.leading, 12)
         .padding(.trailing, 6)
-        .padding(.top, 6)
+        .padding(.vertical, 6)
     }
 
     /// Quit, always in sight, as in the other menu bar apps.
@@ -99,10 +112,10 @@ struct PanelView: View {
         .padding(.vertical, 6)
     }
 
-    /// The status line; with a setup problem, a banner that holds its fix button.
+    /// What the user must act on: one line for tickets that need them, or a banner that holds the setup's
+    /// fix button.
     @ViewBuilder
-    private var top: some View {
-        let status = model.status
+    private func top(_ status: PanelStatus) -> some View {
         let text = VStack(alignment: .leading, spacing: 2) {
             Text(status.headline)
                 .font(.subheadline.weight(.semibold))
@@ -305,7 +318,7 @@ struct PanelView: View {
     private func setupButton(_ title: String) -> some View {
         // Copying a fix or checking again keeps the panel open, to show "Copied ✓" or the new state.
         let staysOpen = switch model.setupProblem?.action {
-        case .copyFix, .checkAgain: true
+        case .copyFix, .checkAgain, .recheckKeychain: true
         default: false
         }
         return Button(title, action: staysOpen ? model.fixSetupProblem : closing(model.fixSetupProblem))
@@ -315,10 +328,28 @@ struct PanelView: View {
     }
 }
 
-/// The panel's own window, to close it should `dismiss` not.
+/// The panel's own window: to close it should `dismiss` not, and to fit it to its content.
 @MainActor
 private final class HostWindow {
-    weak var window: NSWindow?
+    weak var window: NSWindow? {
+        didSet { fit() }
+    }
+
+    private var contentHeight: CGFloat = 0
+
+    /// `MenuBarExtra` grows its window to taller content but never shrinks it, and centres shorter content
+    /// in it: a gap under the menu bar and a blank band at the bottom. The window takes the content's
+    /// height instead, its top edge where AppKit put it.
+    func fit(contentHeight: CGFloat) {
+        self.contentHeight = contentHeight
+        fit()
+    }
+
+    private func fit() {
+        guard let window, let frame = PanelFrame.fitted(window.frame, contentHeight: contentHeight) else { return }
+        window.setFrame(frame, display: true)
+        DebugPanel.log("fitted to \(contentHeight)")
+    }
 }
 
 private struct HostWindowReader: NSViewRepresentable {

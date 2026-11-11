@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import TicketPilotCore
 
-@Suite struct PanelStatusTests {
+@Suite(.timeLimit(.minutes(1))) struct PanelStatusTests {
     static let now = Date(timeIntervalSince1970: 1_800_000_000)
     static let connectJira = SetupProblem(
         title: "Connect Jira…", explanation: "Connect Jira to see your tickets here.", action: .setJiraToken
@@ -22,69 +22,42 @@ import Testing
         return run
     }
 
-    static func make(
-        _ runs: [Run], acknowledged: Set<String> = [], problem: SetupProblem? = nil, todoCount: Int? = 0,
-        summaries: [String: String] = [:]
-    ) -> PanelStatus {
-        PanelStatus.make(
-            runs: runs, acknowledgedDone: acknowledged, setupProblem: problem, todoCount: todoCount, summaries: summaries
-        )
+    static func make(_ runs: [Run], problem: SetupProblem? = nil, signingIn: Bool = false) -> PanelStatus? {
+        PanelStatus.make(runs: runs, setupProblem: problem, signingIn: signingIn)
     }
 
-    @Test func test_quietInvitesACoffeeAndSaysHowManyTicketsAreLeft() {
-        #expect(Self.make([]) == PanelStatus(
-            headline: "All quiet. Enjoy your coffee ☕", subtitle: "No ticket assigned", needsSetup: false
-        ))
-        #expect(Self.make([], todoCount: 1).subtitle == "1 ticket to do")
-        #expect(Self.make([], todoCount: 3).subtitle == "3 tickets to do")
-        // Before the first Jira answer, nothing is claimed about the tickets.
-        #expect(Self.make([], todoCount: nil).subtitle == nil)
+    @Test func test_nothingToSayMeansNoStatusAtAll() {
+        // The cards start right under the header: no "All quiet", no report or progress headline.
+        #expect(Self.make([]) == nil)
+        #expect(Self.make([Self.run("c", .done), Self.run("d", .running), Self.run("u", .unknown)]) == nil)
     }
 
-    @Test func test_ticketsWaitingComeAfterTheSetupAndNameTheLatestOne() {
+    @Test func test_ticketsWaitingAreOneLine() {
         let runs = [
-            Self.run("a", .waiting, key: "ABC-1", updatedMinutesAgo: 30),
-            Self.run("b", .waiting, key: "ABC-2", repo: "web", updatedMinutesAgo: 2, title: "Pick the wording"),
-            Self.run("c", .done),
+            Self.run("a", .waiting, key: "ABC-1"),
+            Self.run("b", .waiting, key: "ABC-2", repo: "web"),
             Self.run("d", .running),
         ]
-        #expect(Self.make(runs, problem: Self.connectJira).needsSetup)
-        let status = Self.make(runs)
-        #expect(status == PanelStatus(headline: "2 tickets need you", subtitle: "Pick the wording", needsSetup: false))
+        #expect(Self.make(runs) == PanelStatus(headline: "2 tickets need you", subtitle: nil, needsSetup: false))
         // Two repos of one ticket are one ticket.
         let oneTicket = [Self.run("a", .waiting), Self.run("b", .waiting, repo: "web")]
-        #expect(Self.make(oneTicket).headline == "1 ticket needs you")
+        #expect(Self.make(oneTicket)?.headline == "1 ticket needs you")
     }
 
     @Test func test_aSetupProblemComesFirstSayingAlmostThereAndWhy() {
         // The panel shows it as a banner holding the button, at the top.
-        let runs = [Self.run("a", .waiting), Self.run("c", .done), Self.run("d", .running)]
+        let runs = [Self.run("a", .waiting), Self.run("c", .done)]
         #expect(Self.make(runs, problem: Self.connectJira) == PanelStatus(
             headline: "Almost there! 👋", subtitle: "Connect Jira to see your tickets here.", needsSetup: true
         ))
     }
 
-    @Test func test_reportsNotOpenedYetComeBeforeRunsInProgress() {
-        let runs = [
-            Self.run("c", .done, key: "ABC-3", updatedMinutesAgo: 10),
-            Self.run("e", .done, key: "ABC-4", updatedMinutesAgo: 1),
-            Self.run("d", .running, key: "ABC-5"),
-        ]
-        #expect(Self.make(runs, summaries: ["ABC-4": "Show the distance"]) == PanelStatus(
-            headline: "2 reports are ready 🎉", subtitle: "Show the distance", needsSetup: false
-        ))
-        #expect(Self.make(runs, acknowledged: ["e"]).headline == "Your report is ready 🎉")
-        #expect(Self.make(runs, acknowledged: ["e"]).subtitle == "ABC-3")
-    }
-
-    @Test func test_workingNamesTheStepOfTheLatestRun() {
-        let runs = [Self.run("d", .running, key: "ABC-5", updatedMinutesAgo: 5), Self.run("u", .unknown, key: "ABC-6")]
-        #expect(Self.make(runs) == PanelStatus(
-            headline: "Working on it…", subtitle: "Verifying · ABC-6", needsSetup: false
-        ))
-        // Every report opened and nothing at work: quiet again.
-        let quiet = Self.make([Self.run("c", .done)], acknowledged: ["c"])
-        #expect(quiet.headline == "All quiet. Enjoy your coffee ☕")
+    @Test func test_anEmptyListSaysNoTicketIsAssigned() {
+        #expect(PanelStatus.emptyListText(hasRuns: false, todoCount: 0) == "No tickets assigned to you")
+        // Not before Jira answered, and not with anything to list.
+        #expect(PanelStatus.emptyListText(hasRuns: false, todoCount: nil) == nil)
+        #expect(PanelStatus.emptyListText(hasRuns: true, todoCount: 0) == nil)
+        #expect(PanelStatus.emptyListText(hasRuns: false, todoCount: 2) == nil)
     }
 
     @Test func test_theTitleComesFromTheRunThenJiraThenTheKey() {
@@ -102,10 +75,7 @@ import Testing
     }
 
     @Test func test_waitingForTheSignInComesFirst() {
-        let status = PanelStatus.make(
-            runs: [Self.run("a", .waiting)], acknowledgedDone: [], setupProblem: Self.connectJira, todoCount: nil,
-            signingIn: true
-        )
+        let status = Self.make([Self.run("a", .waiting)], problem: Self.connectJira, signingIn: true)
         #expect(status == PanelStatus(
             headline: "Waiting for Atlassian sign-in…", subtitle: "Finish signing in in your browser.", needsSetup: true
         ))
