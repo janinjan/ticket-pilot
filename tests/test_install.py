@@ -1,12 +1,18 @@
 import os
 import plistlib
+import struct
 import subprocess
+import tempfile
 import unittest
+import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "install.sh"
-PLIST = ROOT / "app" / "Resources" / "Info.plist"
+RESOURCES = ROOT / "app" / "Resources"
+PLIST = RESOURCES / "Info.plist"
+ICON = RESOURCES / "AppIcon.icns"
+ICON_SCRIPT = RESOURCES / "make-icon.sh"
 
 
 class InstallScriptTests(unittest.TestCase):
@@ -35,6 +41,12 @@ class InstallScriptTests(unittest.TestCase):
         ):
             self.assertIn(expected, self.text)
 
+    def test_script_copies_the_icon_into_the_bundle_before_signing(self):
+        copy = 'cp app/Resources/AppIcon.icns "$bundle/Contents/Resources/"'
+        self.assertIn(copy, self.text)
+        self.assertIn('mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"', self.text)
+        self.assertLess(self.text.index(copy), self.text.index("codesign --force"))
+
     def test_script_works_from_any_directory_and_avoids_sudo(self):
         self.assertIn('cd "$(dirname "${BASH_SOURCE[0]}")"', self.text)
         code = [l for l in self.text.splitlines() if not l.lstrip().startswith("#")]
@@ -49,6 +61,36 @@ class InstallScriptTests(unittest.TestCase):
         self.assertIn("release", result.stderr)
 
 
+class IconTests(unittest.TestCase):
+    def test_icon_is_a_committed_icns_file(self):
+        self.assertTrue(ICON.is_file())
+        self.assertEqual(ICON.read_bytes()[:4], b"icns")
+
+    def test_icon_corners_are_transparent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            iconset = Path(tmp) / "AppIcon.iconset"
+            subprocess.run(["iconutil", "-c", "iconset", str(ICON), "-o", str(iconset)], check=True)
+            data = (iconset / "icon_512x512.png").read_bytes()
+        pos, idat, color_type, depth = 8, b"", None, None
+        while pos < len(data):
+            length, kind = struct.unpack(">I4s", data[pos:pos + 8])
+            body = data[pos + 8:pos + 8 + length]
+            if kind == b"IHDR":
+                depth, color_type = body[8], body[9]
+            elif kind == b"IDAT":
+                idat += body
+            pos += 12 + length
+        self.assertEqual((depth, color_type), (8, 6), "expected an 8-bit RGBA PNG")
+        # The first pixel of the first row is the top-left corner, whatever the row filter is.
+        corner = zlib.decompressobj().decompress(idat, 5)[1:5]
+        self.assertEqual(corner[3], 0, "the corner must be fully transparent")
+
+    def test_icon_source_and_generator_are_valid(self):
+        self.assertTrue((RESOURCES / "AppIcon.svg").is_file())
+        result = subprocess.run(["bash", "-n", str(ICON_SCRIPT)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+
 class InfoPlistTests(unittest.TestCase):
     def setUp(self):
         with PLIST.open("rb") as handle:
@@ -58,6 +100,7 @@ class InfoPlistTests(unittest.TestCase):
         self.assertEqual(self.info["CFBundleIdentifier"], "dev.ticketpilot.menubar")
         self.assertEqual(self.info["CFBundleExecutable"], "TicketPilot")
         self.assertEqual(self.info["CFBundleName"], "TicketPilot")
+        self.assertEqual(self.info["CFBundleIconFile"], "AppIcon")
 
     def test_menu_bar_only_and_macos_14(self):
         self.assertIs(self.info["LSUIElement"], True)

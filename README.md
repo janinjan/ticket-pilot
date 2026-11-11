@@ -37,6 +37,8 @@ Install it from the sources (needs Xcode, for `swift`):
 
 The script builds a universal binary, assembles `~/Applications/TicketPilot.app` with the version of `.claude-plugin/plugin.json`, signs it ad hoc, quits a running copy and opens the new one. Besides the build folder `app/.build` in the checkout, it writes only `~/Applications/TicketPilot.app` (creating `~/Applications` if needed) and never uses `sudo`. `swift build` warns that x86_64 is deprecated for the newest macOS target; the warning is expected and harmless. Installing from a release arrives with `/ticket-pilot:setup`.
 
+The icon source is `app/Resources/AppIcon.svg`; `app/Resources/make-icon.sh` regenerates `app/Resources/AppIcon.icns` from it.
+
 What it reads:
 
 - the run files `runs/*.json` in the state directory (`~/Library/Application Support/ticket-pilot/`, or `TICKET_PILOT_HOME`);

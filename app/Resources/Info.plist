@@ -10,6 +10,8 @@
 	<string>TicketPilot</string>
 	<key>CFBundleExecutable</key>
 	<string>TicketPilot</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
