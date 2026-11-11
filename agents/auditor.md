@@ -68,6 +68,18 @@ Check that the change is what a senior engineer would write:
 - follows the architecture and layering of the module it lives in;
 - clear names, consistent error handling, no leftover debug code.
 
+## Symbol pass (feeds the three axes)
+
+Do this pass in full, for every symbol, before writing the answer. It is the part a quick read misses.
+
+1. List every symbol the diff adds or renames: types, properties, methods, parameters, cases, constants, localisation keys, accessibility or test identifiers, test names, files. Write the list down for yourself; it is not part of the answer.
+2. For each symbol:
+   - **Used?** Search the worktree for its uses outside its own declaration. A symbol read nowhere (for example an identifier no test or code looks up) is dead code → Necessity.
+   - **Already named?** Search the module, then the repo, for the same concept: the same value, field or behaviour under another name (for example the same URL already passed elsewhere under a shorter name). A new name for an existing concept → Conventions, quoting the existing name with its `path:line`.
+   - **Accurate?** The name says what the symbol holds or does, in the terms of the code it lives in: a boolean reads as a yes/no question, a name does not describe a mechanism the code no longer has, and the feature is named with the term the code already uses for it (toggle name, existing types), not a synonym found nowhere in the code → Cleanliness.
+   - **Needed?** A flag or a parameter that only forwards a value the receiver could read itself, or that exists only to hide another value, is indirection → Cleanliness.
+3. Go through every hunk of the diff, in order, to the end. Do not sample.
+
 ## Audit rules
 
 - Audit only the added or modified lines, plus removed lines for the removed comments and TODOs check.

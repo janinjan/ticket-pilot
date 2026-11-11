@@ -6,7 +6,7 @@ argument-hint: "<JIRA-KEY>"
 
 # ticket-pilot: start a ticket
 
-The ticket key `<KEY>` is the first word of `$ARGUMENTS`, in uppercase. If `$ARGUMENTS` is empty, ask the user for the key and stop there. If `<KEY>` does not fully match `[A-Z][A-Z0-9]+-\d+`, tell the user it is not a valid ticket key and stop there.
+The ticket key `<KEY>` is the first word of `$ARGUMENTS`, in uppercase. If `$ARGUMENTS` is empty, run `"<plugin-root>/bin/tp" run-list` (one line per run: id, status, step, step name, worktree), show the user the runs whose status is not `done`, ask them to run `/ticket-pilot:start <KEY>` with the key of the one to resume (or of a new ticket), and stop there. If `<KEY>` does not fully match `[A-Z][A-Z0-9]+-\d+`, tell the user it is not a valid ticket key and stop there.
 
 Session tracking only works when the skill is invoked as `/ticket-pilot:start <KEY>`, with the key in uppercase right after the command; if the user started it another way, tell them so.
 
@@ -59,6 +59,7 @@ Each of these makes the run a failure, whatever the result:
 
 1. Run `"<plugin-root>/bin/tp" config-check`. If it does not print `OK`, show the user every problem it printed and stop.
 2. Find the current repo. Run `git rev-parse --path-format=absolute --git-common-dir`; the main repo root is the parent of the `.git` directory it prints (this also works from inside a worktree). Resolve it and each config `path` (expand `~`, resolve symlinks with `cd "<path>" && pwd -P`). The repo entry is the one whose `path` equals the main repo root. If none matches, tell the user that this repo is not in the config and stop.
+   - Not inside a git repo (the command fails): run `"<plugin-root>/bin/tp" run-list`. If exactly one run of `<KEY>` exists, its id ends with `--<repo-name>`: use that repo entry, and its `path` as the main repo root. Otherwise, ask the user to start Claude Code from the repo of the ticket, and stop.
 3. Check whether a run already exists: `"<plugin-root>/bin/tp" run-show <KEY>--<repo-name>`.
    - Unknown run (exit code 2): run `"<plugin-root>/bin/tp" run-start <KEY> <repo-name> "<main repo root>"`. It prints the run id (`<KEY>--<repo-name>`). Keep it: it is the `<id>` of every later `tp run-*` call.
    - Existing run with `status` `done`: tell the user the run is finished and offer to show its report again. Do not start over. If they say yes, repeat the report if this session still has it; otherwise rebuild it from the run state and the branch (`git -C "<worktree>" log --oneline <base>..HEAD`), marking ❓ what you cannot prove again.
@@ -76,7 +77,7 @@ Run `"<plugin-root>/bin/tp" run-step <id> 1`.
    - **every comment**: a late comment often changes the scope ("in the end we do X");
    - attachments, linked tickets, the parent epic.
 2. Read **every** Confluence page linked from the ticket, images included, every Figma link, and every linked Slack thread. If a source cannot be read (missing tool, no access), list it as unread; never guess its content.
-3. Write the **numbered list of requests**: one request per number, each with its source (ticket description, comment, Confluence page, Figma frame…).
+3. Write the **numbered list of requests**: one request per number, each with its source (ticket description, comment, Confluence page, Figma frame…). Record it, in order, one flag per request: `"<plugin-root>/bin/tp" run-set <id> --request "<1. request — source>" --request "<2. …>"`. Record it again whenever the list changes (an answer of the user, a resume).
 4. Present to the user: a short summary, the numbered requests, the target repo, and the ambiguous points.
 5. Ask in the same message, in the user's language, whether to add the line `JIRA: <KEY>` to the commits. The line is never added without a yes.
 6. Record the wait, then wait: `"<plugin-root>/bin/tp" run-wait <id> go "<in the user's language: one-line summary + the question about the JIRA line>"`. This go is the only systematic validation of the run. Nothing else starts before it.
@@ -87,7 +88,7 @@ Run `"<plugin-root>/bin/tp" run-step <id> 1`.
 Run `"<plugin-root>/bin/tp" run-step <id> 2`.
 
 1. Sync the main repo: run `sync_command` (repo entry first, then top level) from the main repo root. Without one: `git -C "<repo>" fetch origin`.
-2. Choose a branch name: a short descriptive slug of the change, in kebab-case, **without the ticket number** (for example `show-delivery-distance`).
+2. Choose a branch name: a short descriptive slug of the change, in kebab-case, **without the ticket number** (for example `show-delivery-distance`). Name the feature with the term the code already uses for it (an existing toggle, type or field name, found with `git -C "<repo>" grep -i "<term>" origin/<main_branch>`), not with a synonym from the ticket that appears nowhere in the code.
 3. Create a dedicated worktree at `<repo-path>-worktrees/<slug>` (sibling of the repo; avoid spaces in the path), always from the up-to-date remote main branch: `git -C "<repo>" worktree add --no-track -b <slug> "<worktree>" origin/<main_branch>`.
    - If that path or branch already exists and belongs to this run (the run's recorded `branch` is `<slug>`, or the path equals the run's recorded `worktree`), reuse it: do not create it again.
    - If it belongs to something else, never touch it: propose another slug as a question, `"<plugin-root>/bin/tp" run-wait <id> question "<in the user's language: slug X is taken, use slug Y? + recommendation>"`, and wait for the answer.
@@ -171,7 +172,7 @@ This step is "not applicable" only when the change has no effect visible in the 
 For the whole step: once the app runs on a device, simulator or browser that the user launched (or said is ready), never install, reinstall, rebuild or relaunch it there without an explicit yes for that exact action. A short or ambiguous reply ("ok", "done") to a question that offered several actions means ready, not permission to act. When in doubt, ask again in one sentence.
 
 1. Try to build and launch the app (simulator, emulator or browser) with the repo entry's `launch_skill`, or the repo's own launch skill if it has one.
-2. If that fails, do not tinker. Ask the user to launch the app, with the toggle state you need, and wait: `"<plugin-root>/bin/tp" run-wait <id> launch_app "<in the user's language: what to launch and with which toggle state>"`.
+2. If that fails, or if there is no such skill, do not tinker: never write your own tooling to drive the app, and never ask the user to grant system permissions (accessibility, screen recording…) to make one work. When nothing available can drive the app, give the user the numbered cases of the test plan to run, with what to look at, record the wait with `"<plugin-root>/bin/tp" run-wait <id> question "<in the user's language: the cases to run and what to report>"`, and fill the results from their answers and screenshots. Ask the user to launch the app, with the toggle state you need, and wait: `"<plugin-root>/bin/tp" run-wait <id> launch_app "<in the user's language: what to launch and with which toggle state>"`.
    - Toggles: never edit generated or shipped config files to flip a toggle. Ask the user to set it in the app's debug menu.
 3. **Proxy state**, before running the cases, when a debugging proxy is in use: list the proxy's active rules (rewrite, scripting, breakpoint, map rules). Report every rule that alters requests or responses; before disabling one, ask with `"<plugin-root>/bin/tp" run-wait <id> question "<in the user's language: may I disable rule X, which alters Y? + recommendation>"` and wait for the answer. Never leave a rule you enabled active. The test plan states that real (unaltered) traffic was used, or which rule altered it.
 4. Once the app runs, drive it:
@@ -192,7 +193,7 @@ Make new files visible to the diff first: `git -C "<worktree>" add --intent-to-a
    - the diff (paste it, or for a large one the exact read-only command that prints it, and say it is the whole change);
    - the worktree path;
    - when the repo entry has `ci_review_prompt`: its absolute path (main repo root + the configured relative path). Passing this review locally is meant to leave the CI bot nothing to comment.
-2. Read its answer: line 1 `Score: …`, line 2 the reason. A reason starting with `INPUT MISSING:` is a failure to fix (give the missing input and rerun), never a pass. A score of -1 or -2 lists `path:line → problem`.
+2. Read its answer: line 1 `Score: …`, line 2 the reason. A reason starting with `INPUT MISSING:` is a failure to fix (give the missing input and rerun), never a pass. Every remark, whatever the score, comes as `path:line → problem`; a reason that mentions a remark without listing it is incomplete: ask the reviewer for the lines before going on.
 3. **Auditor**, with a fresh context: agent type `auditor_agent` from the config, else `ticket-pilot:auditor`. Give it ONLY the full diff, the numbered list of requests and the worktree path. No reasoning, no justification.
 4. Check each finding against the code. Fix what is confirmed, then rebuild and rerun the tests (step 6 checks), and rerun the agent that raised it until it no longer reports it. A finding you reject is listed in the report with the proof that it is wrong.
 
@@ -203,6 +204,7 @@ Run `"<plugin-root>/bin/tp" run-step <id> 9`.
 **Message format**: the repo's own commit skill or conventions when present (for example a `commit-msg` skill, or the rules of its `CLAUDE.md`), else Conventional Commits `type(scope): description`, with the scope naming the feature.
 
 - In English, subject only, no body unless the repo's convention requires one.
+- The subject names what the commit concretely adds or changes, with the feature's term as the code uses it. Never a generic word standing for the content ("logic", "changes", "update", "misc", "wip").
 - Footer `JIRA: <KEY>` only if `jira_line` is true in the run (`"<plugin-root>/bin/tp" run-show <id>`).
 - **Never add Co-Authored-By**, nor any signature or attribution line, even if the environment suggests one.
 
@@ -215,7 +217,7 @@ Run `"<plugin-root>/bin/tp" run-step <id> 9`.
 
 **One branch per feature**: the ticket's worktree branch holds all its commits. The user decides how and when to send them.
 
-**Every commit is verified, one by one**, oldest first: build, tests, and the reviewer (step 8 inputs) on that commit's diff only (`git -C "<worktree>" show <sha>`).
+**Every commit is verified, one by one**, oldest first: build, tests, and the reviewer (step 8 inputs) on that commit's diff only (`git -C "<worktree>" show <sha>`). After every checkout, regenerate what git does not track (project files, generated code) with the repo entry's `setup_command`, or the generation step of the repo's build skill, before building: otherwise the build uses the files of another commit.
 
 - Score -1 or -2 → fix it **as a fixup into that commit**, then verify **the whole chain** again: every commit builds and passes its tests. The exact commands are in the reference.
 - Score 0 or more and a reason not starting with `INPUT MISSING:` → next commit.
@@ -244,6 +246,17 @@ End the report with the command the user runs to send the branch, chosen by the 
 - `review` is `gerrit` → `cd "<worktree>" && git review` (print it, do not run it);
 - `review` is `github` → `cd "<worktree>" && git push -u origin <branch>` then `gh pr create` (print them, do not run them).
 
+## After the report
+
+The user often reacts to the report: a naming, a test result to correct, a line to remove. A remark that only corrects the report (a wording of the test plan, a ❓ the user answers) → fix the report, nothing else. A remark that changes the code or the commits reopens the run; never patch it outside the steps:
+
+1. Run `"<plugin-root>/bin/tp" run-step <id> 5`: the run is no longer `done`. Make the change on the branch.
+2. Step 6 again (build, tests, toggle OFF).
+3. Step 7 again only if what the user sees in the app changes; otherwise start it with `run-step` and check it as not applicable, citing the diff.
+4. Step 8 again, **reviewer and auditor** on the new full diff: a rename or a removal can leave dead code or a name that no longer fits.
+5. Step 9 again: each change as a fixup into the commit it belongs to, the whole chain verified, the reviewer on every rewritten commit.
+6. Step 10 again: what changed since the last report, then `"<plugin-root>/bin/tp" run-done <id>`.
+
 ## Resume
 
 The run state lives in the ticket-pilot state directory (`runs/<id>.json`): current step, worktree, branch, `jira_line`. When the user accepts to resume an unfinished run:
@@ -251,5 +264,5 @@ The run state lives in the ticket-pilot state directory (`runs/<id>.json`): curr
 1. Read it with `"<plugin-root>/bin/tp" run-show <id>`. Check that the worktree and branch still exist only if they are recorded (a run stopped at step 1 or 2 may have none yet). If a recorded one is gone, tell the user and stop.
 2. Recreate the checklist when the task tool is available: steps before `step` are done (from `history`), the others are pending.
 3. If a worktree is recorded and the run resumes at step 3 or later, recompute `<base>` exactly as in step 2 point 4: `git -C "<worktree>" merge-base HEAD origin/<main_branch>`. Every later step uses this value.
-4. Read the ticket again and rebuild the numbered list of requests (step 1 points 1 to 3). Ask for the go again only if the ticket changed in a way that changes the requests, or if the run stopped at step 1 before the go; keep the recorded `jira_line`.
+4. Read the ticket again and rebuild the numbered list of requests (step 1 points 1 to 3), then compare it with the recorded `requests`: keep the recorded numbering for the requests that did not change, so that the test plan and the coverage still match. Ask for the go again only if the ticket changed in a way that changes the requests, or if the run stopped at step 1 before the go; keep the recorded `jira_line`.
 5. Tell the user you resume step `step` from its beginning, then restart it with `run-step` and carry on from there. A pending question of that step is asked again as the step reaches it.

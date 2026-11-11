@@ -56,6 +56,17 @@ class AgentFileTests(unittest.TestCase):
         _, body = split_agent(read_agent("reviewer"))
         self.assertIn("CI review prompt", body)
 
+    def test_reviewer_lists_remarks_at_every_score(self):
+        _, body = split_agent(read_agent("reviewer"))
+        self.assertIn("one line per problem or suggestion, whatever the score", body)
+        self.assertNotIn("For `0`, `+1` or `+2`, nothing after line 2", body)
+
+    def test_auditor_checks_every_added_symbol(self):
+        _, body = split_agent(read_agent("auditor"))
+        self.assertIn("## Symbol pass", body)
+        for check in ("**Used?**", "**Already named?**", "**Accurate?**", "**Needed?**"):
+            self.assertIn(check, body)
+
     def test_auditor_has_three_axes(self):
         _, body = split_agent(read_agent("auditor"))
         for section in ["## Conventions", "## Necessity", "## Cleanliness"]:

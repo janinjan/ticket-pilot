@@ -22,6 +22,8 @@ After running the plan, mark every expected result:
 - ❌ failed, with what was actually observed;
 - ❓ to be confirmed (could not be checked, or the expected value is written nowhere).
 
+Every expected result and every observation names the exact state seen on screen, never a close one: "unchecked" is not "disabled" or "greyed out", "hidden" is not "empty". Before the report, check each wording against the screenshot or the answer it comes from.
+
 ## Coverage (in the report, outside the plan)
 
 The final report adds a **Coverage** list next to the plan, one line per case: case title → request number and/or diff branch (`path:line`). This is where the traceability to the code goes; the plan itself stays free of it.

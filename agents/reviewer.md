@@ -88,11 +88,11 @@ Your answer is exactly this, with no text before or after:
 ```
 Score: <-2|-1|0|+1|+2>
 <one short line: the reason for the score>
-<for a negative score only, one line per problem:>
+<one line per problem or suggestion, whatever the score:>
 path:line → problem
 ```
 
 - Line 1: `Score: ` followed by one of `-2`, `-1`, `0`, `+1`, `+2`.
 - Line 2: the short reason. When an input is missing, it starts with `INPUT MISSING:`.
-- For `-2` or `-1`, then one line per problem: `path:line → problem`, with `path` relative to the worktree root and `line` the line number in the new version of the file.
-- For `0`, `+1` or `+2`, nothing after line 2.
+- Then one line per problem or suggestion: `path:line → problem`, with `path` relative to the worktree root and `line` the line number in the new version of the file. This applies to every score: a `+1` lists each suggestion that keeps it from `+2`.
+- The reason line never mentions a remark that is not listed below it. Nothing after line 2 only when there is no remark at all, or when an input is missing.

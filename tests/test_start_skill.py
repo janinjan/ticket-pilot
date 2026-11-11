@@ -272,6 +272,44 @@ class StartSkillTests(unittest.TestCase):
         resume = skill()[skill().index("## Resume"):]
         self.assertIn("Recreate the checklist when the task tool is available", resume)
 
+    def test_missing_key_lists_the_runs(self):
+        text = skill()
+        head = text[:text.index("## Absolute rule")]
+        self.assertRegex(head, r'tp"? run-list')
+        startup = text[text.index("## Start-up"):text.index("## Step 1 — ")]
+        self.assertIn("Not inside a git repo", startup)
+        self.assertRegex(startup, r'tp"? run-list')
+
+    def test_requests_are_recorded_and_reused_on_resume(self):
+        text = skill()
+        self.assertRegex(step_sections(text)[1], r'tp"? run-set <id> --request "')
+        resume = text[text.index("## Resume"):]
+        self.assertIn("recorded `requests`", resume)
+
+    def test_feedback_after_the_report_reopens_the_run(self):
+        text = skill()
+        after = text[text.index("## After the report"):text.index("## Resume")]
+        reopen = after.find('tp" run-step <id> 5')
+        done = after.find('tp" run-done <id>')
+        self.assertNotEqual(reopen, -1, "a code change after the report must reopen the run")
+        self.assertLess(reopen, done)
+        self.assertIn("reviewer and auditor", after)
+
+    def test_each_commit_regenerates_untracked_files(self):
+        self.assertIn("regenerate what git does not track", step_sections(skill())[9])
+        reference = read(os.path.join(SKILL_DIR, "references/commit-splitting.md"))
+        self.assertIn("regenerate what git does not track", reference)
+        self.assertIn('--exec "<setup command> && ', reference)
+
+    def test_app_test_never_builds_its_own_driving_tool(self):
+        section = step_sections(skill())[7]
+        self.assertIn("never write your own tooling to drive the app", section)
+        self.assertIn("system permissions", section)
+
+    def test_commit_subject_is_never_generic(self):
+        section = step_sections(skill())[9]
+        self.assertIn("Never a generic word", section)
+
     def test_report_has_a_coverage_list(self):
         text = skill()
         self.assertIn("Coverage", step_sections(text)[7])
