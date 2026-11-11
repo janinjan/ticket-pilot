@@ -169,6 +169,24 @@ class OptionalKeyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             return config.validate(config.load(write_json(tmp, data)))
 
+    def env_problems(self, env):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = minimal_repo("ios", tmp)
+            repo["env"] = env
+            return config.validate(config.load(write_json(tmp, {"repos": [repo]})))
+
+    def test_repo_env_accepts_string_map(self):
+        self.assertEqual(self.env_problems({"PROJECT_ROOT": "{worktree}", "_A1": "x"}), [])
+
+    def test_repo_env_must_be_an_object(self):
+        self.assertIn("repos[ios].env must be an object of string to string", self.env_problems(["A"]))
+
+    def test_repo_env_rejects_bad_names_and_values(self):
+        problems = self.env_problems({"1BAD": "x", "A-B": "x", "OK": 3})
+        self.assertIn("repos[ios].env: invalid variable name '1BAD'", problems)
+        self.assertIn("repos[ios].env: invalid variable name 'A-B'", problems)
+        self.assertIn("repos[ios].env.OK must be a string", problems)
+
     def test_top_level_optional_keys_must_be_strings(self):
         for key in self.STRING_KEYS:
             problems = self.problems_for({"repos": [], key: 5})

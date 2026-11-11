@@ -33,6 +33,21 @@ TOP_STRING_KEYS = (
 )
 
 
+ENV_NAME_PATTERN = r"[A-Za-z_][A-Za-z0-9_]*"
+
+
+def _env_problems(name: str, env) -> list[str]:
+    if not isinstance(env, dict):
+        return ["repos[%s].env must be an object of string to string" % name]
+    problems = []
+    for key, value in env.items():
+        if not re.fullmatch(ENV_NAME_PATTERN, key):
+            problems.append("repos[%s].env: invalid variable name %r" % (name, key))
+        if not isinstance(value, str):
+            problems.append("repos[%s].env.%s must be a string" % (name, key))
+    return problems
+
+
 def load(path: Path | None = None) -> dict:
     """Read the config file and apply defaults.
 
@@ -96,6 +111,8 @@ def validate(cfg: dict) -> list[str]:
         for key in REPO_STRING_KEYS:
             if key in repo and not isinstance(repo[key], str):
                 problems.append("repos[%s].%s must be a string" % (name, key))
+        if "env" in repo:
+            problems.extend(_env_problems(name, repo["env"]))
         prompt = repo.get("ci_review_prompt")
         if (
             isinstance(prompt, str)

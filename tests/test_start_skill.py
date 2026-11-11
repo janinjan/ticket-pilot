@@ -354,6 +354,12 @@ class StartSkillTests(unittest.TestCase):
         self.assertIn("Coverage", step_sections(text)[7])
         self.assertIn("Coverage", step_sections(text)[10])
 
+    def test_worktree_commands_apply_the_run_environment(self):
+        text = skill()
+        self.assertIn('eval "$("<plugin-root>/bin/tp" run-env <id>)"', text)
+        self.assertIn("run-env", step_sections(text)[2])
+        self.assertIn("run-env", read(os.path.join(SKILL_DIR, "references/commit-splitting.md")))
+
 
 if __name__ == "__main__":
     unittest.main()

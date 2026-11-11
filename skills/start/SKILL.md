@@ -51,7 +51,7 @@ Each of these makes the run a failure, whatever the result:
 
 **The user's memory for this repo.** Claude Code loads the user's memory only for the directory the session started in: a session started in the worktree or in another directory does not see the memory of the repo, and a loaded index is not a rule applied. So read it yourself, at start-up and on resume: the folder is `~/.claude/projects/<name>/memory/`, where `<name>` is the main repo root with every non-alphanumeric character replaced by `-` (for example `/home/a.b/dev/app` gives `-home-a-b-dev-app`). Read its `MEMORY.md` and every file it links about code, naming, vocabulary, tests or commits. No such folder → say so once and carry on. Go over these rules again before naming anything (the branch in step 2, every symbol in step 5, every commit subject in step 9) and before splitting the commits: a rule of the memory wins over a default of this skill, for example the order or the grouping of the split.
 
-**The worktree.** Bash `cd` outside the session's working directory may not persist between calls. Every command for the worktree is either `cd "<worktree>" && …` in the same call or `git -C "<worktree>" …`. Every file edit uses an absolute path inside the worktree. Never edit the main checkout.
+**The worktree.** Bash `cd` outside the session's working directory may not persist between calls. Every command for the worktree is either `cd "<worktree>" && …` in the same call or `git -C "<worktree>" …`. Every file edit uses an absolute path inside the worktree. Never edit the main checkout. Every command run in the worktree (setup, build, tests, project generation, `ci_review_command`) is prefixed with the run's environment from the repo entry's `env`: `cd "<worktree>" && eval "$("<plugin-root>/bin/tp" run-env <id>)" && …` (it prints nothing when the entry has no `env`).
 
 **Questions.** Ask only for decisions that change what gets built: a real divergence between sources, a real ambiguity, a conflict between the design and the ticket. One question at a time, always with your recommendation. Every question to the user (the go, a divergence, a branch reference, launching the app, any choice) is recorded first with `"<plugin-root>/bin/tp" run-wait <id> <kind> "<the question text, in the user's language>"`, the text of the question itself, never an empty text; the steps below repeat it where it applies. Then wait for the answer.
 
@@ -98,7 +98,7 @@ Run `"<plugin-root>/bin/tp" run-step <id> 2`.
    - If it belongs to something else, never touch it: propose another slug as a question, `"<plugin-root>/bin/tp" run-wait <id> question "<in the user's language: slug X is taken, use slug Y? + recommendation>"`, and wait for the answer.
 4. Note the base commit: `git -C "<worktree>" merge-base HEAD origin/<main_branch>`. It is `<base>` in every later step.
 5. Record it: `"<plugin-root>/bin/tp" run-set <id> --worktree "<worktree>" --branch <slug>`.
-6. Set up the worktree: `cd "<worktree>" && <setup_command>`, or the repo's own build skill when it handles project generation itself.
+6. Set up the worktree: `cd "<worktree>" && eval "$("<plugin-root>/bin/tp" run-env <id>)" && <setup_command>` (with the run's environment, like every command in the worktree), or the repo's own build skill when it handles project generation itself.
 7. If any of this fails: stop, report what failed with its output. Do not improvise a workaround.
 
 ## Step 3 — Research

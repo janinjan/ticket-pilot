@@ -17,6 +17,7 @@
         "components": ["iOS"]
       },
       "setup_command": "make bootstrap",
+      "env": {"PROJECT_ROOT": "{worktree}"},
       "ci_review_prompt": "docs/ci-review-prompt.md",
       "ci_review_command": "scripts/ci-review-local.sh \"$TP_REV\"",
       "launch_skill": "run-ios-app",

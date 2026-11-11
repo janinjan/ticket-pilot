@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 
 from ticket_pilot import commit_size, config, hooks, runs
@@ -70,6 +71,31 @@ def cmd_run_show(args: argparse.Namespace) -> int:
     if run is None:
         return _fail("unknown run: %s" % args.run_id)
     print(json.dumps(run, indent=2))
+    return 0
+
+
+def cmd_run_env(args: argparse.Namespace) -> int:
+    run = runs.load(args.run_id)
+    if run is None:
+        return _fail("unknown run: %s" % args.run_id)
+    try:
+        cfg = config.load()
+    except (OSError, ValueError) as error:
+        return _fail("config file is not readable JSON: %s" % error)
+    repo = config.repo_by_name(cfg, run.get("repo", ""))
+    env = repo.get("env") if repo else None
+    if not isinstance(env, dict):
+        return 0
+    worktree = run.get("worktree")
+    for name, value in env.items():
+        if not isinstance(value, str) or not re.fullmatch(config.ENV_NAME_PATTERN, str(name)):
+            continue
+        if "{worktree}" in value and not worktree:
+            print("%s skipped: the worktree is not recorded yet" % name, file=sys.stderr)
+            continue
+        value = value.replace("{repo}", run.get("repo_path") or "")
+        value = value.replace("{worktree}", worktree or "")
+        print("export %s='%s'" % (name, value.replace("'", "'\\''")))
     return 0
 
 
@@ -154,6 +180,10 @@ def build_parser() -> argparse.ArgumentParser:
     show = subparsers.add_parser("run-show", help="print a run as JSON")
     show.add_argument("run_id")
     show.set_defaults(func=cmd_run_show)
+
+    env = subparsers.add_parser("run-env", help="print the repo's environment as export lines")
+    env.add_argument("run_id")
+    env.set_defaults(func=cmd_run_env)
 
     listing = subparsers.add_parser("run-list", help="print one line per stored run")
     listing.set_defaults(func=cmd_run_list)

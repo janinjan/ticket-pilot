@@ -266,5 +266,53 @@ class RunsCliTests(RunsTestCase):
         self.assertEqual(code, 2)
 
 
+class RunEnvTests(RunsTestCase):
+    def write_config(self, env):
+        path = os.path.join(self._tmp.name, "cfg.json")
+        repo = {"name": "app", "path": "/tmp/app", "main_branch": "main", "review": "github"}
+        if env is not None:
+            repo["env"] = env
+        with open(path, "w") as handle:
+            json.dump({"repos": [repo]}, handle)
+        saved = os.environ.get("TICKET_PILOT_CONFIG")
+        os.environ["TICKET_PILOT_CONFIG"] = path
+        self.addCleanup(
+            lambda: os.environ.pop("TICKET_PILOT_CONFIG", None)
+            if saved is None
+            else os.environ.__setitem__("TICKET_PILOT_CONFIG", saved)
+        )
+
+    def test_substitutes_placeholders_and_quotes(self):
+        self.write_config({"ROOT": "{worktree}", "MAIN": "{repo}/x", "Q": "it's"})
+        runs.start("ABC-1", "app", "/tmp/app")
+        runs.update("ABC-1--app", worktree="/tmp/wt")
+        code, out, _ = self.run_cli("run-env", "ABC-1--app")
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            out.splitlines(),
+            ["export ROOT='/tmp/wt'", "export MAIN='/tmp/app/x'", "export Q='it'\\''s'"],
+        )
+
+    def test_prints_nothing_without_env(self):
+        self.write_config(None)
+        runs.start("ABC-1", "app", "/tmp/app")
+        code, out, _ = self.run_cli("run-env", "ABC-1--app")
+        self.assertEqual((code, out), (0, ""))
+
+    def test_unknown_run_exits_2(self):
+        self.write_config({"A": "b"})
+        code, out, err = self.run_cli("run-env", "NOPE--app")
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("unknown run", err)
+
+    def test_worktree_not_recorded_skips_variables_using_it(self):
+        self.write_config({"ROOT": "{worktree}", "MAIN": "{repo}"})
+        runs.start("ABC-1", "app", "/tmp/app")
+        code, out, err = self.run_cli("run-env", "ABC-1--app")
+        self.assertEqual(code, 0)
+        self.assertEqual(out.splitlines(), ["export MAIN='/tmp/app'"])
+        self.assertIn("ROOT", err)
+
+
 if __name__ == "__main__":
     unittest.main()
