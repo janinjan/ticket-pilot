@@ -13,7 +13,7 @@ public struct PanelStatus: Equatable, Sendable {
         self.needsSetup = needsSetup
     }
 
-    /// In order: the setup problem ("Almost there! 👋" and its explanation, the button next to them),
+    /// In order: the Atlassian sign-in in progress (the panel's button then cancels it), the setup problem ("Almost there! 👋" and its explanation, the button next to them),
     /// tickets waiting for the user, reports not opened yet, runs in progress, else "All quiet" with the
     /// number of tickets to do (`todoCount` is nil until Jira first answered). The subtitle names the most
     /// recently updated run of the headline by its title (`RunTitle.of`, with `summaries` from Jira).
@@ -22,8 +22,14 @@ public struct PanelStatus: Equatable, Sendable {
         acknowledgedDone: Set<String>,
         setupProblem: SetupProblem?,
         todoCount: Int?,
-        summaries: [String: String] = [:]
+        summaries: [String: String] = [:],
+        signingIn: Bool = false
     ) -> PanelStatus {
+        if signingIn {
+            return PanelStatus(
+                headline: "Waiting for Atlassian sign-in…", subtitle: "Finish signing in in your browser.", needsSetup: true
+            )
+        }
         if let setupProblem {
             return PanelStatus(headline: "Almost there! 👋", subtitle: setupProblem.explanation, needsSetup: true)
         }

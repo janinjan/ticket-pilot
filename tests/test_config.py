@@ -206,6 +206,15 @@ class OptionalKeyTests(unittest.TestCase):
             (Path(tmp) / "docs" / "review.md").write_text("x")
             self.assertEqual(config.validate(cfg), [])
 
+    def test_jira_auth_must_be_mcp_or_api_token(self):
+        jira = {"site": "https://example.atlassian.net", "email": "a@example.com", "keychain_service": "s"}
+        for value in ("mcp", "api_token"):
+            self.assertEqual(self.problems_for({"repos": [], "jira": dict(jira, auth=value)}), [])
+        self.assertEqual(self.problems_for({"repos": [], "jira": jira}), [])
+        for value in ("oauth", 1, None):
+            problems = self.problems_for({"repos": [], "jira": dict(jira, auth=value)})
+            self.assertIn("jira.auth must be 'mcp' or 'api_token'", problems)
+
     def test_example_config_documents_optional_keys(self):
         data = json.loads((ROOT / "config.example.json").read_text())
         for key in ("sync_command", "reviewer_agent", "auditor_agent", "terminal_app", "permission_mode"):

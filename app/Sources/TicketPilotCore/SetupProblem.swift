@@ -8,6 +8,8 @@ public struct SetupProblem: Equatable, Sendable {
         case copyFix(HealthCheck)
         /// Asks for the Jira token.
         case setJiraToken
+        /// Signs in to Atlassian in the browser, for the Atlassian MCP server.
+        case connectAtlassian
         /// Shows what is wrong and how to fix it.
         case explain(AlertText)
         /// Runs the setup check again.
@@ -35,8 +37,8 @@ public struct SetupProblem: Equatable, Sendable {
 
     static let claudeCodeURL = URL(string: "https://docs.claude.com/claude-code")!
 
-    /// In order: a config error, Claude Code missing, the plugin missing, the Jira token to enter, the
-    /// Keychain refusing access, Jira unreachable (or failing to answer the poll), a repo path missing, an
+    /// In order: a config error, Claude Code missing, the plugin missing, the Jira token to enter (or the
+    /// Atlassian sign-in to make, or Atlassian's refusal to explain), the Keychain refusing access, Jira unreachable (or failing to answer the poll), a repo path missing, an
     /// older plugin than the one the app carries (it still runs, so the update comes last).
     /// `jiraFailing` only counts once the checks are in, so a missing token is not shown as unreachable first.
     /// The other failed checks (MCP servers, disk space) are only warnings: they stay in Diagnostics.
@@ -72,6 +74,24 @@ public struct SetupProblem: Equatable, Sendable {
             return SetupProblem(
                 title: "Allow Keychain access…",
                 explanation: "Allow Keychain access so TicketPilot can read your Jira token.",
+                action: .explain(AlertText(title: "Keychain access", message: message))
+            )
+        }
+        if let signIn = failed(.jiraSignIn) {
+            if signIn.needsToken {
+                return SetupProblem(title: "Connect Jira…", explanation: "Connect Jira to see your tickets here.", action: .connectAtlassian)
+            }
+            let message = [signIn.detail, signIn.fix].compactMap { $0 }.joined(separator: "\n\n")
+            if signIn.refusedByServer {
+                return SetupProblem(
+                    title: "See why Jira refused…",
+                    explanation: "Atlassian refused the connection to Jira.",
+                    action: .explain(AlertText(title: "Atlassian refused the connection", message: message))
+                )
+            }
+            return SetupProblem(
+                title: "Allow Keychain access…",
+                explanation: "Allow Keychain access so TicketPilot can read your Atlassian sign-in.",
                 action: .explain(AlertText(title: "Keychain access", message: message))
             )
         }

@@ -24,7 +24,7 @@ private final class MCPRunner: ProcessRunning, @unchecked Sendable {
 
 private struct TokenError: Error {}
 
-@Suite struct DoctorTests {
+@Suite(.timeLimit(.minutes(1))) struct DoctorTests {
     struct Fixture {
         var home: URL
         var claude: String
@@ -66,12 +66,13 @@ private struct TokenError: Error {}
         return Fixture(home: home, claude: claudePath, repoPaths: paths, bundledManifest: manifest)
     }
 
-    func makeConfig(_ fixture: Fixture) throws -> AppConfig {
+    func makeConfig(_ fixture: Fixture, auth: String = "api_token") throws -> AppConfig {
         let repos = ["ios", "web"].map {
             #"{"name":"\#($0)","path":"\#(fixture.repoPaths[$0]!)","main_branch":"main","review":"none"}"#
         }
         let json = """
-        {"jira":{"site":"https://example.atlassian.net","email":"me@example.com","keychain_service":"tp-test"},
+        {"jira":{"site":"https://example.atlassian.net","email":"me@example.com","keychain_service":"tp-test",\
+        "auth":"\(auth)"},
          "repos":[\(repos.joined(separator: ","))]}
         """
         return try JSONDecoder().decode(AppConfig.self, from: Data(json.utf8))
@@ -82,10 +83,11 @@ private struct TokenError: Error {}
         runner: ProcessRunning = MCPRunner(output: "atlassian: https://x - ✓ Connected\nfigma: https://y - ✓ Connected\n"),
         jira: JiraSearching? = FakeJira(),
         token: @escaping @Sendable () throws -> String = { "secret" },
-        freeBytes: Int64? = 100_000_000_000
+        freeBytes: Int64? = 100_000_000_000,
+        auth: String = "api_token"
     ) throws -> Doctor {
         Doctor(
-            config: try makeConfig(fixture),
+            config: try makeConfig(fixture, auth: auth),
             home: fixture.home,
             runner: runner,
             jira: jira,
@@ -241,6 +243,109 @@ private struct TokenError: Error {}
         #expect(try check(refusedByJira, .jiraToken).needsToken)
         #expect(try !check(keychainFailed, .jiraToken).needsToken)
         #expect(try !check(healthy, .jiraToken).needsToken)
+    }
+
+    // MARK: - Atlassian MCP
+
+    func makeMCPDoctor(
+        _ fixture: Fixture,
+        jira: JiraSearching? = FakeJira(),
+        credentials: @escaping @Sendable () throws -> String = { "stored" }
+    ) throws -> Doctor {
+        try makeDoctor(fixture, jira: jira, token: credentials, auth: "mcp")
+    }
+
+    @Test func test_mcpConnected() async throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.home) }
+        let checks = await (try makeMCPDoctor(fixture)).run()
+        #expect(checks.map(\.id) == [.claudeCLI, .plugin, .jiraSignIn, .jiraReachable, .mcp, .repoPaths, .diskSpace])
+        let signIn = try check(checks, .jiraSignIn)
+        #expect(signIn.ok)
+        #expect(signIn.detail == "Connected via Atlassian MCP")
+        #expect(HealthCheck.Kind.jiraSignIn.title == "Jira sign-in")
+        #expect(try check(checks, .jiraReachable).ok)
+    }
+
+    @Test func test_mcpNotConnectedAsksToConnect() async throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.home) }
+        let checks = await (try makeMCPDoctor(fixture, jira: nil, credentials: { throw KeychainError.notFound })).run()
+        let signIn = try check(checks, .jiraSignIn)
+        #expect(!signIn.ok)
+        #expect(signIn.blocksStart)
+        #expect(signIn.needsToken)
+        #expect(signIn.detail == "Not connected to Atlassian")
+        #expect(signIn.fix == nil)
+        #expect(try check(checks, .jiraReachable).detail == "not checked: not connected")
+    }
+
+    @Test func test_mcpSignInRefusedAsksToConnectAgain() async throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.home) }
+        for error in [JiraError.unauthorized, .notConnected] {
+            let checks = await (try makeMCPDoctor(fixture, jira: FakeJira(error))).run()
+            let signIn = try check(checks, .jiraSignIn)
+            #expect(!signIn.ok)
+            #expect(signIn.needsToken)
+            #expect(signIn.detail == "Atlassian refused the sign-in")
+        }
+    }
+
+    @Test func test_mcpRefusalShowsTheServerMessage() async throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.home) }
+        let message = "Your organization admin must approve this app before you can use it."
+        let checks = await (try makeMCPDoctor(fixture, jira: FakeJira(.refused(message)))).run()
+        let signIn = try check(checks, .jiraSignIn)
+        #expect(!signIn.ok)
+        #expect(signIn.blocksStart)
+        #expect(!signIn.needsToken)
+        #expect(signIn.refusedByServer)
+        #expect(signIn.detail == message)
+        #expect(signIn.fix == "Ask your Atlassian administrator to allow the Atlassian MCP server, or use an API token instead (Settings › Jira).")
+    }
+
+    @Test func test_mcpKeychainRefusedIsNotANewSignIn() async throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.home) }
+        let checks = await (try makeMCPDoctor(fixture, jira: nil, credentials: { throw KeychainError.unexpected(-128) })).run()
+        let signIn = try check(checks, .jiraSignIn)
+        #expect(!signIn.ok)
+        #expect(!signIn.needsToken)
+        #expect(!signIn.refusedByServer)
+        #expect(signIn.detail == "Keychain access was refused or failed (status -128)")
+    }
+
+    @Test func test_mcpKeychainFailureWhileCheckingIsNotAServerRefusal() async throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.home) }
+        let checks = await (try makeMCPDoctor(fixture, jira: FakeJira(.keychain(-25308)))).run()
+        let signIn = try check(checks, .jiraSignIn)
+        #expect(!signIn.ok)
+        #expect(!signIn.refusedByServer)
+        #expect(!signIn.needsToken)
+        #expect(signIn.detail == "Keychain access was refused or failed (status -25308)")
+    }
+
+    @Test func test_mcpServerErrorIsNotASignInRefusal() async throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.home) }
+        let checks = await (try makeMCPDoctor(fixture, jira: FakeJira(.serverError("Tool failed")))).run()
+        #expect(try check(checks, .jiraSignIn).ok)
+        let reachable = try check(checks, .jiraReachable)
+        #expect(!reachable.ok)
+        #expect(reachable.detail == "Tool failed")
+    }
+
+    @Test func test_mcpUnreachable() async throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.home) }
+        let checks = await (try makeMCPDoctor(fixture, jira: FakeJira(.unreachable))).run()
+        #expect(try check(checks, .jiraSignIn).ok)
+        let reachable = try check(checks, .jiraReachable)
+        #expect(!reachable.ok)
+        #expect(reachable.blocksStart)
     }
 
     @Test func test_httpErrorPointsAtTheSite() async throws {

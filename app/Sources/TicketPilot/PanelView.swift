@@ -117,10 +117,16 @@ struct PanelView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
-        if status.needsSetup, let title = model.setupProblemTitle {
+        if status.needsSetup, model.signingIn || model.setupProblemTitle != nil {
             VStack(alignment: .leading, spacing: 8) {
                 text
-                setupButton(title)
+                if model.signingIn {
+                    // Stays open: the sign-in goes on in the browser.
+                    Button("Cancel", action: model.cancelSignIn)
+                        .accessibilityLabel("Cancel the Atlassian sign-in")
+                } else if let title = model.setupProblemTitle {
+                    setupButton(title)
+                }
             }
             .padding(10)
             .background(Brand.orange.opacity(0.12), in: Card.shape)

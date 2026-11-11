@@ -27,17 +27,42 @@ public enum ConfigEditor {
         let key = "\"terminal_app\""
         if let name {
             guard let encoded = try? JSONEncoder().encode(name) else { throw .invalidName }
-            let value = Value.scalar(String(decoding: encoded, as: UTF8.self))
-            if let last = members.lastIndex(where: { $0.key == key }) {
-                members[last].value = value
-                members = members.enumerated().filter { $0.offset == last || $0.element.key != key }.map(\.element)
-            } else {
-                members.append((key, value))
-            }
+            set(key, to: .scalar(String(decoding: encoded, as: UTF8.self)), in: &members)
         } else {
             members.removeAll { $0.key == key }
         }
         return Data((render(.object(members), indent: "") + "\n").utf8)
+    }
+
+    /// Sets `jira.auth` to `value` (`mcp` or `api_token`), every other key kept; a new key goes at the end
+    /// of the `jira` object.
+    public static func setJiraAuth(_ value: String, in data: Data) throws(ConfigEditError) -> Data {
+        guard (try? JSONSerialization.jsonObject(with: data)) != nil else { throw .invalidJSON }
+        var parser = Parser(bytes: Array(data))
+        let root: Value
+        do {
+            root = try parser.document()
+        } catch {
+            throw .invalidJSON
+        }
+        guard case var .object(members) = root,
+              let jiraIndex = members.lastIndex(where: { $0.key == "\"jira\"" }),
+              case var .object(jira) = members[jiraIndex].value
+        else { throw .notAnObject }
+        guard let encoded = try? JSONEncoder().encode(value) else { throw .invalidName }
+        set("\"auth\"", to: .scalar(String(decoding: encoded, as: UTF8.self)), in: &jira)
+        members[jiraIndex].value = .object(jira)
+        return Data((render(.object(members), indent: "") + "\n").utf8)
+    }
+
+    /// Replaces the last `key` (dropping its duplicates), else appends it.
+    private static func set(_ key: String, to value: Value, in members: inout [(key: String, value: Value)]) {
+        if let last = members.lastIndex(where: { $0.key == key }) {
+            members[last].value = value
+            members = members.enumerated().filter { $0.offset == last || $0.element.key != key }.map(\.element)
+        } else {
+            members.append((key, value))
+        }
     }
 
     /// A JSON value; keys and scalars are kept as their source text.

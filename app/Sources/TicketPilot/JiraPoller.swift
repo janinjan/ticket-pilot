@@ -12,19 +12,19 @@ enum PollOutcome {
 @MainActor
 final class JiraPoller {
     private let seenStore: SeenStore
-    private let onPoll: @MainActor (PollOutcome, JiraClient) async -> Void
+    private let onPoll: @MainActor (PollOutcome, any JiraSearching) async -> Void
     private var seen: Set<String>?
     private var schedule = PollSchedule(pollMinutes: 5)
     private var task: Task<Void, Never>?
 
-    init(seenStore: SeenStore, onPoll: @escaping @MainActor (PollOutcome, JiraClient) async -> Void) {
+    init(seenStore: SeenStore, onPoll: @escaping @MainActor (PollOutcome, any JiraSearching) async -> Void) {
         self.seenStore = seenStore
         self.onPoll = onPoll
         seen = seenStore.load()
     }
 
     /// Polls at once, then on schedule; replaces any previous loop.
-    func start(jira: JiraClient, pollMinutes: Int) {
+    func start(jira: any JiraSearching, pollMinutes: Int) {
         stop()
         schedule = PollSchedule(pollMinutes: pollMinutes)
         task = Task { [weak self] in
@@ -40,7 +40,7 @@ final class JiraPoller {
         task = nil
     }
 
-    private func poll(_ jira: JiraClient) async -> Duration {
+    private func poll(_ jira: any JiraSearching) async -> Duration {
         let result: Result<[JiraIssue], JiraError>
         do throws(JiraError) {
             result = .success(try await jira.openAssignedIssues())

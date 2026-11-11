@@ -26,20 +26,29 @@ public enum Keychain {
     }
 
     /// Stores `password` as the generic password of `service` and `account`: replaces an existing
-    /// item, adds one otherwise. Never logs or persists it elsewhere.
-    public static func setPassword(_ password: String, service: String, account: String) throws(KeychainError) {
+    /// item, adds one otherwise. Never logs or persists it elsewhere. `label` names the item in Keychain
+    /// Access; `thisDeviceOnly` keeps it readable only while the Mac is unlocked, and out of backups.
+    public static func setPassword(
+        _ password: String,
+        service: String,
+        account: String,
+        label: String? = nil,
+        thisDeviceOnly: Bool = false
+    ) throws(KeychainError) {
         // Updates whichever account holds the item, so one stored under another account is replaced.
         let existing: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
         ]
         let data = Data(password.utf8)
-        let updateStatus = SecItemUpdate(existing as CFDictionary, [kSecValueData: data] as CFDictionary)
+        var changes: [CFString: Any] = [kSecValueData: data]
+        if let label { changes[kSecAttrLabel] = label }
+        if thisDeviceOnly { changes[kSecAttrAccessible] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly }
+        let updateStatus = SecItemUpdate(existing as CFDictionary, changes as CFDictionary)
         if updateStatus == errSecSuccess { return }
         guard updateStatus == errSecItemNotFound else { throw .unexpected(updateStatus) }
-        var attributes = existing
+        var attributes = existing.merging(changes) { _, change in change }
         attributes[kSecAttrAccount] = account
-        attributes[kSecValueData] = data
         let addStatus = SecItemAdd(attributes as CFDictionary, nil)
         guard addStatus == errSecSuccess else { throw .unexpected(addStatus) }
     }
@@ -50,6 +59,15 @@ public enum Keychain {
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
             kSecAttrAccount: account,
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+
+    /// Deletes every item of `service`, whatever its account; a missing item is not an error.
+    public static func deleteItems(service: String) {
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
         ]
         SecItemDelete(query as CFDictionary)
     }

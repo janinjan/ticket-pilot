@@ -37,6 +37,7 @@ struct AppConfigTests {
         #expect(config.permissionMode == nil)
         #expect(config.stuckMinutes == [:])
         #expect(config.repos[0].match.labels == [])
+        #expect(config.jira.auth == .mcp)
 
         let overridden = try AppConfig.load(from: writeTemp("""
         {"jira": {"site": "https://example.atlassian.net", "email": "a@example.com",
@@ -96,5 +97,17 @@ struct AppConfigTests {
         let config = try AppConfig.load(from: url)
         #expect(config.jira.browseURL(key: "ABC-1").absoluteString == "https://example.atlassian.net/browse/ABC-1")
         #expect(config.repos[0].expandedPath == NSHomeDirectory() + "/repos/ios")
+    }
+
+    @Test func test_readsTheJiraAuth() throws {
+        func config(_ auth: String) throws -> AppConfig {
+            try AppConfig.load(from: try writeTemp("""
+            {"jira": {"site": "https://example.atlassian.net", "email": "a@example.com",
+                      "keychain_service": "svc", "auth": "\(auth)"}, "repos": []}
+            """))
+        }
+        #expect(try config("mcp").jira.auth == .mcp)
+        #expect(try config("api_token").jira.auth == .apiToken)
+        #expect(throws: ConfigError.self) { try config("password") }
     }
 }

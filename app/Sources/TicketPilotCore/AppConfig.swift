@@ -5,14 +5,31 @@ public enum ConfigError: Error, Equatable {
     case invalid(String)
 }
 
+/// How the app reads Jira: through the Atlassian Remote MCP server (OAuth sign-in), or the REST API with
+/// an API token.
+public enum JiraAuth: String, Decodable, Sendable {
+    case mcp
+    case apiToken = "api_token"
+}
+
 public struct JiraSettings: Decodable, Sendable {
     public var site: URL
     public var email: String
     public var keychainService: String
+    /// `mcp` when absent.
+    public var auth: JiraAuth
 
     private enum CodingKeys: String, CodingKey {
-        case site, email
+        case site, email, auth
         case keychainService = "keychain_service"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        site = try container.decode(URL.self, forKey: .site)
+        email = try container.decode(String.self, forKey: .email)
+        keychainService = try container.decode(String.self, forKey: .keychainService)
+        auth = try container.decodeIfPresent(JiraAuth.self, forKey: .auth) ?? .mcp
     }
 }
 

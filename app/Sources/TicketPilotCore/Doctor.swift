@@ -2,13 +2,14 @@ import Foundation
 
 public struct HealthCheck: Equatable, Identifiable, Sendable {
     public enum Kind: String, CaseIterable, Sendable {
-        case claudeCLI, plugin, jiraToken, jiraReachable, mcp, repoPaths, diskSpace
+        case claudeCLI, plugin, jiraToken, jiraSignIn, jiraReachable, mcp, repoPaths, diskSpace
 
         public var title: String {
             switch self {
             case .claudeCLI: "Claude Code"
             case .plugin: "Plugin"
             case .jiraToken: "Jira token"
+            case .jiraSignIn: "Jira sign-in"
             case .jiraReachable: "Jira"
             case .mcp: "MCP servers"
             case .repoPaths: "Repos"
@@ -23,9 +24,12 @@ public struct HealthCheck: Equatable, Identifiable, Sendable {
     public var fix: String?
     public var blocksStart: Bool
     public var blockedRepos: [String]
-    /// True when only a new Jira token can fix this check (missing, or refused by Jira); false
-    /// when the Keychain itself refused access.
+    /// True when only a new Jira token (or a new Atlassian sign-in) can fix this check (missing, or
+    /// refused by Jira); false when the Keychain itself refused access.
     public var needsToken: Bool
+    /// For the Atlassian sign-in: Atlassian refused with its own explanation (`detail`), which a new
+    /// sign-in would not change (an administrator block, for example).
+    public var refusedByServer: Bool
     /// For the plugin check: the installed plugin compared with the copy the app carries.
     public var pluginState: PluginState?
 
@@ -37,6 +41,7 @@ public struct HealthCheck: Equatable, Identifiable, Sendable {
         blocksStart: Bool = false,
         blockedRepos: [String] = [],
         needsToken: Bool = false,
+        refusedByServer: Bool = false,
         pluginState: PluginState? = nil
     ) {
         self.id = id
@@ -46,6 +51,7 @@ public struct HealthCheck: Equatable, Identifiable, Sendable {
         self.blocksStart = blocksStart
         self.blockedRepos = blockedRepos
         self.needsToken = needsToken
+        self.refusedByServer = refusedByServer
         self.pluginState = pluginState
     }
 }
@@ -76,7 +82,9 @@ extension Array where Element == HealthCheck {
     }
 }
 
-/// Checks that everything a run needs is in place. Never logs or returns the Jira token.
+/// Checks that everything a run needs is in place. Never logs or returns the Jira token or the Atlassian
+/// sign-in. `tokenLookup` reads the API token, or with `jira.auth` `mcp` the stored sign-in
+/// (`KeychainError.notFound` when there is none).
 public struct Doctor: Sendable {
     private static let pluginKey = "ticket-pilot@ticket-pilot"
     private static let lowDiskBytes: Int64 = 10 * 1024 * 1024 * 1024
@@ -202,6 +210,84 @@ public struct Doctor: Sendable {
     }
 
     private func checkJira() async -> (token: HealthCheck, reachable: HealthCheck) {
+        switch config.jira.auth {
+        case .apiToken: await checkJiraToken()
+        case .mcp: await checkJiraSignIn()
+        }
+    }
+
+    private func checkJiraSignIn() async -> (token: HealthCheck, reachable: HealthCheck) {
+        let site = config.jira.site.absoluteString
+        do {
+            _ = try tokenLookup()
+        } catch {
+            let missing = if case let KeychainError.unexpected(status) = error {
+                HealthCheck(
+                    id: .jiraSignIn,
+                    ok: false,
+                    detail: "Keychain access was refused or failed (status \(status))",
+                    fix: "Allow TicketPilot in the Keychain prompt, then choose Check again",
+                    blocksStart: true
+                )
+            } else {
+                HealthCheck(id: .jiraSignIn, ok: false, detail: "Not connected to Atlassian", blocksStart: true, needsToken: true)
+            }
+            return (missing, HealthCheck(id: .jiraReachable, ok: false, detail: "not checked: not connected"))
+        }
+        let connected = HealthCheck(id: .jiraSignIn, ok: true, detail: "Connected via Atlassian MCP")
+        guard let jira else {
+            return (connected, HealthCheck(id: .jiraReachable, ok: false, detail: "not checked: no Jira client"))
+        }
+        do {
+            try await jira.checkCredentials()
+            return (connected, HealthCheck(id: .jiraReachable, ok: true, detail: site))
+        } catch .unauthorized, .notConnected {
+            return (
+                HealthCheck(
+                    id: .jiraSignIn, ok: false, detail: "Atlassian refused the sign-in", blocksStart: true, needsToken: true
+                ),
+                HealthCheck(id: .jiraReachable, ok: true, detail: site)
+            )
+        } catch let .keychain(status) {
+            return (
+                HealthCheck(
+                    id: .jiraSignIn,
+                    ok: false,
+                    detail: "Keychain access was refused or failed (status \(status))",
+                    fix: "Allow TicketPilot in the Keychain prompt, then choose Check again",
+                    blocksStart: true
+                ),
+                HealthCheck(id: .jiraReachable, ok: false, detail: "not checked: Keychain refused")
+            )
+        } catch let .refused(message) {
+            return (
+                HealthCheck(
+                    id: .jiraSignIn,
+                    ok: false,
+                    detail: message,
+                    fix: "Ask your Atlassian administrator to allow the Atlassian MCP server, or use an API token instead (Settings › Jira).",
+                    blocksStart: true,
+                    refusedByServer: true
+                ),
+                HealthCheck(id: .jiraReachable, ok: true, detail: site)
+            )
+        } catch {
+            return (connected, unreachable(error))
+        }
+    }
+
+    private func unreachable(_ error: JiraError) -> HealthCheck {
+        let (detail, fix) = switch error {
+        case .unreachable: ("Jira is unreachable", "Check the network or the VPN")
+        case let .http(status): ("Jira answered unexpectedly", "Check jira.site in the config (HTTP \(status))")
+        case let .refused(message), let .serverError(message): (message, "Check jira.site in the config")
+        case let .keychain(status): ("Keychain access was refused or failed (status \(status))", "Allow TicketPilot in the Keychain prompt")
+        case .invalidResponse, .unauthorized, .notConnected: ("Jira answered unexpectedly", "Check jira.site in the config")
+        }
+        return HealthCheck(id: .jiraReachable, ok: false, detail: detail, fix: fix, blocksStart: true)
+    }
+
+    private func checkJiraToken() async -> (token: HealthCheck, reachable: HealthCheck) {
         let service = config.jira.keychainService
         do {
             _ = try tokenLookup()
@@ -246,15 +332,7 @@ public struct Doctor: Sendable {
                 HealthCheck(id: .jiraReachable, ok: true, detail: config.jira.site.absoluteString)
             )
         } catch {
-            let (detail, fix) = switch error {
-            case .unreachable: ("Jira is unreachable", "Check the network or the VPN")
-            case let .http(status): ("Jira answered unexpectedly", "Check jira.site in the config (HTTP \(status))")
-            case .invalidResponse, .unauthorized: ("Jira answered unexpectedly", "Check jira.site in the config")
-            }
-            return (
-                tokenFound,
-                HealthCheck(id: .jiraReachable, ok: false, detail: detail, fix: fix, blocksStart: true)
-            )
+            return (tokenFound, unreachable(error))
         }
     }
 

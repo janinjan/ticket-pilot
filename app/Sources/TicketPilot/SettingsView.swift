@@ -1,7 +1,7 @@
 import SwiftUI
 import TicketPilotCore
 
-/// The Settings window: Open at login, the terminal, and every setup check.
+/// The Settings window: Open at login, the terminal, the Jira connection, and every setup check.
 struct SettingsView: View {
     let model: AppModel
 
@@ -25,6 +25,7 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            JiraSection(model: model)
             Section("Diagnostics") {
                 if let configError = model.configError {
                     CheckRow(ok: false, title: "Config", detail: configError)
@@ -40,6 +41,10 @@ struct SettingsView: View {
                     CheckRow(ok: check.ok, title: check.id.title, detail: check.detail, fix: check.fix) {
                         if check.id == .jiraToken, !check.ok, check.needsToken {
                             Button("Set Jira token…", action: model.setJiraToken)
+                        } else if check.id == .jiraSignIn, !check.ok, check.needsToken {
+                            Button("Connect…", action: model.connectAtlassian)
+                                .disabled(model.signingIn)
+                                .accessibilityLabel("Connect Jira")
                         } else if let state = check.pluginState, state.needsInstall, model.health.claudePath != nil {
                             Button(state == .missing ? "Install…" : "Update…") { model.installPlugin(state) }
                                 .disabled(model.installingPlugin)
@@ -65,6 +70,63 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(width: 480)
         .frame(minHeight: 420, idealHeight: 640)
+    }
+}
+
+/// How Jira is read: the Atlassian sign-in (connected or not), or an API token; and the switch between them.
+private struct JiraSection: View {
+    let model: AppModel
+
+    var body: some View {
+        Section {
+            switch model.jiraAuth {
+            case .mcp:
+                HStack(spacing: 8) {
+                    if model.signingIn {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Waiting for Atlassian sign-in…")
+                        Spacer(minLength: 8)
+                        Button("Cancel", action: model.cancelSignIn)
+                            .accessibilityLabel("Cancel the Atlassian sign-in")
+                    } else if model.hasAtlassianSignIn {
+                        Text(model.jiraAccount.map { "Connected as \($0)" } ?? "Connected via Atlassian MCP")
+                            .textSelection(.enabled)
+                        Spacer(minLength: 8)
+                        Button("Disconnect", action: model.disconnectJira)
+                            .accessibilityLabel("Disconnect Jira")
+                    } else {
+                        Text("Not connected")
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: 8)
+                        Button("Connect Jira…", action: model.connectAtlassian)
+                    }
+                }
+                .controlSize(.small)
+                Button("Use an API token instead…", action: model.useAPIToken)
+                    .buttonStyle(.link)
+                    .accessibilityHint("Saves jira.auth as api_token in your config, then asks for the token")
+            case .apiToken:
+                HStack(spacing: 8) {
+                    Text("API token")
+                    Spacer(minLength: 8)
+                    Button("Set Jira token…", action: model.setJiraToken)
+                        .controlSize(.small)
+                }
+                Button("Use the Atlassian sign-in instead…", action: model.useAtlassianSignIn)
+                    .buttonStyle(.link)
+                    .accessibilityHint("Saves jira.auth as mcp in your config, then opens the Atlassian sign-in")
+            }
+        } header: {
+            Text("Jira")
+        } footer: {
+            Text(model.jiraAuth == .mcp
+                ? "Signed in through the Atlassian MCP server. The sign-in stays in your Mac's Keychain."
+                : "Reads Jira with your API token, kept in your Mac's Keychain.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .disabled(model.configError != nil)
     }
 }
 

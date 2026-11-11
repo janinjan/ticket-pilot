@@ -100,4 +100,14 @@ import Testing
         #expect(RepoName.display("web") == "Web")
         #expect(RepoName.display("backend-api") == "backend-api")
     }
+
+    @Test func test_waitingForTheSignInComesFirst() {
+        let status = PanelStatus.make(
+            runs: [Self.run("a", .waiting)], acknowledgedDone: [], setupProblem: Self.connectJira, todoCount: nil,
+            signingIn: true
+        )
+        #expect(status == PanelStatus(
+            headline: "Waiting for Atlassian sign-in…", subtitle: "Finish signing in in your browser.", needsSetup: true
+        ))
+    }
 }

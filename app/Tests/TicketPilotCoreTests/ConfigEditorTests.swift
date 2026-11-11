@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import TicketPilotCore
 
-@Suite struct ConfigEditorTests {
+@Suite(.timeLimit(.minutes(1))) struct ConfigEditorTests {
     static let config = """
     {
       "jira": {"site": "https://example.atlassian.net", "email": "me@example.com", "keychain_service": "tp"},
@@ -104,5 +104,32 @@ import Testing
         #expect(throws: ConfigEditError.invalidJSON) { try Self.edit("Warp", in: "{\"a\": ") }
         #expect(throws: ConfigEditError.invalidJSON) { try Self.edit("Warp", in: "{\"a\": 1} trailing") }
         #expect(throws: ConfigEditError.notAnObject) { try Self.edit("Warp", in: "[1, 2]") }
+    }
+
+    // MARK: - jira.auth
+
+    static func editAuth(_ value: String, in text: String = config) throws -> String {
+        String(decoding: try ConfigEditor.setJiraAuth(value, in: Data(text.utf8)), as: UTF8.self)
+    }
+
+    @Test func test_setsTheJiraAuthInsideJiraAndKeepsEverythingElse() throws {
+        let output = try Self.editAuth("api_token")
+        let before = try Self.object(Self.config).mutableCopy() as! NSMutableDictionary
+        let jira = (before["jira"] as! NSDictionary).mutableCopy() as! NSMutableDictionary
+        jira["auth"] = "api_token"
+        before["jira"] = jira
+        #expect(try Self.object(output) == before)
+        #expect(output.contains("\"ratio\": 1.50"))
+        #expect(output.contains(#""keychain_service": "tp",\#n    "auth": "api_token""#))
+    }
+
+    @Test func test_replacesAnExistingJiraAuth() throws {
+        let output = try Self.editAuth("mcp", in: #"{"jira": {"auth": "api_token", "site": "s"}}"#)
+        #expect(output == "{\n  \"jira\": {\n    \"auth\": \"mcp\",\n    \"site\": \"s\"\n  }\n}\n")
+    }
+
+    @Test func test_jiraAuthNeedsAJiraObject() {
+        #expect(throws: ConfigEditError.notAnObject) { try Self.editAuth("mcp", in: #"{"jira": 1}"#) }
+        #expect(throws: ConfigEditError.notAnObject) { try Self.editAuth("mcp", in: #"{"repos": []}"#) }
     }
 }

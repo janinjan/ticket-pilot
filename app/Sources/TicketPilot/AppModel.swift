@@ -39,6 +39,14 @@ final class AppModel {
     private(set) var summaries: [String: String] = [:]
     /// True from the plugin install's confirmation until its last command has run.
     private(set) var installingPlugin = false
+    /// `jira.auth` of the config: how Jira is read.
+    private(set) var jiraAuth: JiraAuth = .mcp
+    /// An Atlassian sign-in is stored (`jira.auth` `mcp`), whether or not Atlassian accepts it.
+    private(set) var hasAtlassianSignIn = false
+    /// The email of the signed-in Atlassian account, once Atlassian told it.
+    private(set) var jiraAccount: String?
+    /// From "Connect Jira" until the browser came back, or the sign-in was cancelled.
+    private(set) var signingIn = false
 
     /// `UNUserNotificationCenter` and `SMAppService` need a `.app` bundle.
     let hasBundle = Bundle.main.bundleIdentifier != nil
@@ -66,7 +74,8 @@ final class AppModel {
             acknowledgedDone: acknowledged,
             setupProblem: setupProblem,
             todoCount: jiraAnswered ? todo.ready.count + todo.backlog.count : nil,
-            summaries: summaries
+            summaries: summaries,
+            signingIn: signingIn
         )
     }
 
@@ -105,6 +114,12 @@ final class AppModel {
     @ObservationIgnored private var terminalTask: Task<Void, Never>?
     @ObservationIgnored private var doctorTask: Task<Void, Never>?
     @ObservationIgnored private var copiedTask: Task<Void, Never>?
+    /// The Atlassian Remote MCP sign-in, kept in the Keychain (`ticket-pilot-atlassian-mcp`).
+    @ObservationIgnored private let atlassianAuth = AtlassianMCPAuth()
+    @ObservationIgnored private var signInTask: Task<Void, Never>?
+    @ObservationIgnored private var pendingSignIn: MCPSignIn?
+    /// The sign-in in progress, so that a cancelled one never ends a newer one.
+    @ObservationIgnored private var signInID: UUID?
     /// The run version (`updatedAt`) each size was measured for, or is being measured for.
     @ObservationIgnored private var measuredAt: [String: Date] = [:]
     /// What each commit count was made for, or is being made for: the run version (`updatedAt`) and the
@@ -144,7 +159,7 @@ final class AppModel {
         runDoctor()
     }
 
-    /// Reloads the config and the Jira token, checks the setup and polls Jira at once.
+    /// Reloads the config and the Jira token (or the Atlassian sign-in), checks the setup and polls Jira at once.
     func runDoctor() {
         doctorTask?.cancel()
         loadConfig()
@@ -154,16 +169,30 @@ final class AppModel {
             health = []
             return
         }
+        jiraAuth = config.jira.auth
         let service = config.jira.keychainService
         let runner = runner
+        let auth = atlassianAuth
         doctorTask = Task { [weak self] in
-            let token = await Task.detached {
-                Result<String, KeychainError> { () throws(KeychainError) in try Keychain.password(service: service) }
-            }.value
-            guard !Task.isCancelled, let self else { return }
-            let jira = (try? token.get()).map {
-                JiraClient(site: config.jira.site, email: config.jira.email, token: $0)
+            let token: Result<String, KeychainError>
+            let jira: (any JiraSearching)?
+            switch config.jira.auth {
+            case .apiToken:
+                token = await Task.detached {
+                    Result<String, KeychainError> { () throws(KeychainError) in try Keychain.password(service: service) }
+                }.value
+                jira = (try? token.get()).map {
+                    JiraClient(site: config.jira.site, email: config.jira.email, token: $0)
+                }
+            case .mcp:
+                token = await Self.atlassianSignIn(auth)
+                jira = (try? token.get()).map { _ in
+                    MCPJiraClient(site: config.jira.site, tools: MCPClient(url: auth.server, tokens: auth, clientVersion: Self.version))
+                }
             }
+            guard !Task.isCancelled, let self else { return }
+            hasAtlassianSignIn = config.jira.auth == .mcp && (try? token.get()) != nil
+            if !hasAtlassianSignIn { jiraAccount = nil }
             if let jira {
                 poller?.start(jira: jira, pollMinutes: config.pollMinutes)
             } else {
@@ -182,6 +211,26 @@ final class AppModel {
             let checks = await Task.detached { await doctor.run() }.value
             guard !Task.isCancelled else { return }
             health = checks
+            if let mcp = jira as? MCPJiraClient, checks.contains(where: { $0.id == .jiraSignIn && $0.ok }) {
+                let email = try? await mcp.accountEmail()
+                guard !Task.isCancelled else { return }
+                jiraAccount = email
+            }
+        }
+    }
+
+    private static var version: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+    }
+
+    /// Whether an Atlassian sign-in is stored, as the doctor's token lookup reads it: `.notFound` without
+    /// one, `.unexpected` when the Keychain refused. The sign-in itself never leaves the Keychain item.
+    private nonisolated static func atlassianSignIn(_ auth: AtlassianMCPAuth) async -> Result<String, KeychainError> {
+        do {
+            return try await auth.isConnected() ? .success("") : .failure(.notFound)
+        } catch {
+            if case let .keychain(status) = error { return .failure(.unexpected(status)) }
+            return .failure(.notFound)
         }
     }
 
@@ -262,7 +311,7 @@ final class AppModel {
 
     // MARK: - Jira
 
-    private func apply(_ outcome: PollOutcome, from jira: JiraClient) async {
+    private func apply(_ outcome: PollOutcome, from jira: any JiraSearching) async {
         switch outcome {
         case .failed:
             jiraFailing = true
@@ -279,7 +328,7 @@ final class AppModel {
     }
 
     /// A failure here only keeps the previous set: it never affects polling or the todo list.
-    private func refreshReleasable(_ jira: JiraClient) async {
+    private func refreshReleasable(_ jira: any JiraSearching) async {
         let polledRuns = runs
         let keys = Set(polledRuns.map(\.key)).sorted()
         guard !keys.isEmpty, let categories = try? await jira.statusCategories(of: keys) else { return }
@@ -607,21 +656,29 @@ final class AppModel {
     /// Writes `terminal_app` into the config (nil removes it, for "Automatic"), every other key kept.
     func setTerminalApp(_ name: String?) {
         guard name != selectedTerminal else { return }
+        editConfig(failure: "The terminal was not changed") { try ConfigEditor.setTerminalApp(name, in: $0) }
+        runDoctor()
+    }
+
+    /// Edits the config file in place; false (after an alert titled `failure`) when it could not.
+    @discardableResult
+    private func editConfig(failure: String, _ edit: (Data) throws -> Data) -> Bool {
         // A symlinked config is edited where it points, not replaced by a plain file.
         let file = paths.configFile.resolvingSymlinksInPath()
         do {
             let data = try Data(contentsOf: file)
-            try ConfigEditor.setTerminalApp(name, in: data).write(to: file, options: .atomic)
+            try edit(data).write(to: file, options: .atomic)
+            return true
         } catch {
             let detail = switch error {
             case ConfigEditError.invalidJSON: "\(file.path) is not valid JSON."
-            case ConfigEditError.notAnObject: "\(file.path) does not hold a JSON object."
-            case ConfigEditError.invalidName: "This terminal name cannot be saved."
+            case ConfigEditError.notAnObject: "\(file.path) does not hold a JSON object with a jira object."
+            case ConfigEditError.invalidName: "This value cannot be saved."
             default: error.localizedDescription
             }
-            Alerts.show(AlertText(title: "The terminal was not changed", message: detail))
+            Alerts.show(AlertText(title: failure, message: detail))
+            return false
         }
-        runDoctor()
     }
 
     func setOpenAtLogin(_ enabled: Bool) {
@@ -641,6 +698,7 @@ final class AppModel {
         case let .openURL(url): NSWorkspace.shared.open(url)
         case let .copyFix(check): copyFix(of: check)
         case .setJiraToken: setJiraToken()
+        case .connectAtlassian: connectAtlassian()
         case let .explain(text): Alerts.show(text)
         case .checkAgain: runDoctor()
         case let .installPlugin(state): installPlugin(state)
@@ -718,6 +776,86 @@ final class AppModel {
             try? await Task.sleep(for: .seconds(5))
             guard !Task.isCancelled else { return }
             self?.copiedFix = nil
+        }
+    }
+
+    // MARK: - Atlassian sign-in
+
+    /// Opens the Atlassian sign-in in the browser and waits (five minutes at most) for it to come back to
+    /// TicketPilot's loopback listener; then checks the setup again and polls.
+    func connectAtlassian() {
+        guard !signingIn else { return }
+        signingIn = true
+        let id = UUID()
+        signInID = id
+        let auth = atlassianAuth
+        signInTask = Task { [weak self] in
+            do throws(MCPError) {
+                let signIn = try await auth.beginSignIn()
+                guard let self, signInID == id, !Task.isCancelled else {
+                    signIn.cancel()
+                    return
+                }
+                pendingSignIn = signIn
+                NSWorkspace.shared.open(signIn.authorizeURL)
+                _ = try await auth.completeSignIn(signIn)
+                guard signInID == id else { return }
+                finishSignIn()
+                runDoctor()
+            } catch {
+                // A cancelled sign-in was already ended by `cancelSignIn`, or replaced by a newer one.
+                guard let self, signInID == id else { return }
+                finishSignIn()
+                if error != .cancelled {
+                    Alerts.show(AlertText(title: "Jira was not connected", message: error.message))
+                }
+            }
+        }
+    }
+
+    func cancelSignIn() {
+        pendingSignIn?.cancel()
+        signInTask?.cancel()
+        finishSignIn()
+    }
+
+    private func finishSignIn() {
+        signingIn = false
+        pendingSignIn = nil
+        signInTask = nil
+        signInID = nil
+    }
+
+    /// Forgets the Atlassian sign-in (deletes its Keychain item) and checks the setup again.
+    func disconnectJira() {
+        cancelSignIn()
+        let auth = atlassianAuth
+        Task { [weak self] in
+            await auth.disconnect()
+            self?.jiraAccount = nil
+            self?.runDoctor()
+        }
+    }
+
+    /// Switches `jira.auth` to `api_token`, then asks for the token.
+    func useAPIToken() {
+        cancelSignIn()
+        guard editConfig(failure: "Jira was not switched to an API token", { try ConfigEditor.setJiraAuth("api_token", in: $0) })
+        else { return }
+        runDoctor()
+        setJiraToken()
+    }
+
+    /// Switches `jira.auth` back to `mcp`, then signs in unless a sign-in is already stored.
+    func useAtlassianSignIn() {
+        guard editConfig(failure: "Jira was not switched to the Atlassian sign-in", { try ConfigEditor.setJiraAuth("mcp", in: $0) })
+        else { return }
+        runDoctor()
+        let auth = atlassianAuth
+        Task { [weak self] in
+            if case .failure(.notFound) = await Self.atlassianSignIn(auth) {
+                self?.connectAtlassian()
+            }
         }
     }
 

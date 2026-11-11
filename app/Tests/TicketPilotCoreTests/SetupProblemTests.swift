@@ -110,4 +110,38 @@ import Testing
         #expect(SetupProblem.first(in: [Self.mcp, Self.disk, Self.fine]) == nil)
         #expect(SetupProblem.first(in: []) == nil)
     }
+
+    // MARK: - Atlassian MCP
+
+    static let notSignedIn = HealthCheck(
+        id: .jiraSignIn, ok: false, detail: "Not connected to Atlassian", blocksStart: true, needsToken: true
+    )
+
+    @Test func test_notSignedInConnectsJiraThroughAtlassian() {
+        let problem = SetupProblem.first(in: [Self.unreachable, Self.notSignedIn])
+        #expect(problem == SetupProblem(
+            title: "Connect Jira…", explanation: "Connect Jira to see your tickets here.", action: .connectAtlassian
+        ))
+    }
+
+    @Test func test_refusedByAtlassianExplainsWithTheServerMessage() {
+        let refused = HealthCheck(
+            id: .jiraSignIn, ok: false, detail: "Your admin blocked this app", fix: "Ask your admin",
+            blocksStart: true, refusedByServer: true
+        )
+        #expect(SetupProblem.first(in: [refused]) == SetupProblem(
+            title: "See why Jira refused…",
+            explanation: "Atlassian refused the connection to Jira.",
+            action: .explain(AlertText(title: "Atlassian refused the connection", message: "Your admin blocked this app\n\nAsk your admin"))
+        ))
+    }
+
+    @Test func test_keychainRefusedForTheSignInExplainsItsFix() {
+        let keychain = HealthCheck(id: .jiraSignIn, ok: false, detail: "Keychain refused", fix: "Allow TicketPilot", blocksStart: true)
+        #expect(SetupProblem.first(in: [keychain]) == SetupProblem(
+            title: "Allow Keychain access…",
+            explanation: "Allow Keychain access so TicketPilot can read your Atlassian sign-in.",
+            action: .explain(AlertText(title: "Keychain access", message: "Keychain refused\n\nAllow TicketPilot"))
+        ))
+    }
 }
