@@ -65,27 +65,6 @@ extension Array where Element == HealthCheck {
         case .pick: first { !$0.ok && $0.blocksStart }
         }
     }
-
-    public var firstProblem: HealthCheck? {
-        first { !$0.ok }
-    }
-
-    /// The health line of the menu: a config error first, then "Checking…" until the doctor
-    /// has answered, then the first failed check, else "All good".
-    public func summary(configError: String?) -> String {
-        if let configError { return "Config: \(configError)" }
-        if isEmpty { return "Checking…" }
-        return firstProblem.map { "\($0.id.title): \($0.detail)" } ?? "All good"
-    }
-
-    /// The Jira token must be entered: missing, or refused by Jira. Not when Keychain access failed.
-    public var needsToken: Bool {
-        contains { !$0.ok && $0.needsToken }
-    }
-
-    public var hasProblem: Bool {
-        contains { !$0.ok }
-    }
 }
 
 /// Checks that everything a run needs is in place. Never logs or returns the Jira token.

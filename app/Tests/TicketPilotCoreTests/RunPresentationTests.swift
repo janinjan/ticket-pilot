@@ -38,23 +38,70 @@ import Testing
         #expect(RunIconState.make(runs: [], acknowledgedDone: []) == .idle)
     }
 
-    @Test func test_runLineFormatsStepAndDurations() {
+    @Test func test_runSectionFollowsTheStatus() {
+        #expect(RunSection.of(Self.run(status: .waiting, waitingMinutesAgo: 1)) == .needsYou)
+        #expect(RunSection.of(Self.run(status: .running)) == .inProgress)
+        #expect(RunSection.of(Self.run(status: .unknown)) == .inProgress)
+        #expect(RunSection.of(Self.run(status: .done)) == .reportReady)
+        #expect(RunSection.allCases.map(\.title) == ["Needs you", "In progress", "Report ready"])
+    }
+
+    @Test func test_stepLabelsAreHuman() {
+        let labels = [
+            "understand": "Understanding", "prepare": "Preparing", "research": "Researching",
+            "compare": "Comparing", "implement": "Coding", "verify": "Verifying",
+            "app_test": "Testing in the app", "review": "Reviewing", "commits": "Committing",
+            "report": "Writing the report",
+        ]
+        for (name, label) in labels {
+            #expect(RunLine.stepLabel(name) == label)
+        }
+        #expect(RunLine.stepLabel("mystery") == "Mystery")
+        #expect(RunLine.stepLabel("") == "")
+    }
+
+    @Test func test_inProgressLineShowsTheStepAndItsDuration() {
         let line = RunLine.make(Self.run(), now: Self.now, stuckMinutes: [:])
-        #expect(line.title == "ABC-1 · ios")
-        #expect(line.detail == "6/10 · verify · 12 min")
-        #expect(line.waitingFor == nil)
         #expect(line.runID == "ABC-1--ios")
+        #expect(line.section == .inProgress)
+        #expect(line.name == "ABC-1")
+        #expect(line.detail == "Verifying · 12 min")
 
-        let waiting = RunLine.make(
-            Self.run(status: .waiting, waitingMinutesAgo: 5), now: Self.now, stuckMinutes: [:]
-        )
-        #expect(waiting.waitingFor == "waiting 5 min")
-
-        let long = RunLine.make(Self.run(startedMinutesAgo: 65), now: Self.now, stuckMinutes: [:])
-        #expect(long.detail == "6/10 · verify · 1 h 05")
+        let long = RunLine.make(Self.run(startedMinutesAgo: 65), now: Self.now, stuckMinutes: ["verify": 90])
+        #expect(long.detail == "Verifying · 1 h 05")
 
         let fallback = RunLine.make(Self.run(startedMinutesAgo: nil), now: Self.now, stuckMinutes: [:])
-        #expect(fallback.detail == "6/10 · verify · 0 min")
+        #expect(fallback.detail == "Verifying · 0 min")
+
+        let stuck = RunLine.make(Self.run(stepName: "implement", step: 5, startedMinutesAgo: 121), now: Self.now, stuckMinutes: [:])
+        // "Maybe stuck" is a tag of its own, not part of the text.
+        #expect(stuck.detail == "Coding · 2 h 01")
+        #expect(stuck.isStuck)
+    }
+
+    @Test func test_needsYouLineShowsTheQuestionOrTheKindFallback() {
+        var run = Self.run(status: .waiting, waitingMinutesAgo: 5)
+        run.waiting?.text = "Which layout?"
+        #expect(RunLine.make(run, now: Self.now, stuckMinutes: [:]).detail == "Which layout?")
+        #expect(RunLine.make(run, now: Self.now, stuckMinutes: [:]).section == .needsYou)
+        let fallbacks = [
+            "go": "Waiting for your go", "launch_app": "Launch the app",
+            "input": "Waiting for your input", "question": "Waiting for you",
+        ]
+        for (kind, text) in fallbacks {
+            run.waiting = Run.Waiting(kind: kind, text: "", since: Self.now)
+            #expect(RunLine.make(run, now: Self.now, stuckMinutes: [:]).detail == text)
+        }
+        run.waiting = nil
+        #expect(RunLine.make(run, now: Self.now, stuckMinutes: [:]).detail == "Waiting for you")
+    }
+
+    @Test func test_reportReadyLineShowsDoneAndTheTimeSinceTheLastUpdate() {
+        var run = Self.run(status: .done)
+        run.updatedAt = Self.now.addingTimeInterval(-36 * 60)
+        let line = RunLine.make(run, now: Self.now, stuckMinutes: [:])
+        #expect(line.section == .reportReady)
+        #expect(line.detail == "Done · 36 min")
     }
 
     @Test func test_stuckUsesDefaultsAndOverrides() {
@@ -67,14 +114,78 @@ import Testing
         #expect(!RunLine.make(unknownStep, now: Self.now, stuckMinutes: [:]).isStuck)
     }
 
-    @Test func test_menuBarIconShowsCountStateAndAlert() {
-        let idle = MenuBarIcon.make(todoCount: 3, iconState: .idle, jiraFailing: false, hasHealthProblem: false)
-        #expect(idle == MenuBarIcon(countText: "3", stateSymbol: nil, stateCount: nil, showsAlert: false))
-        let waiting = MenuBarIcon.make(todoCount: 0, iconState: .waiting(count: 2), jiraFailing: false, hasHealthProblem: true)
-        #expect(waiting == MenuBarIcon(countText: "0", stateSymbol: "hand.raised", stateCount: 2, showsAlert: true))
-        #expect(MenuBarIcon.make(todoCount: 1, iconState: .running, jiraFailing: false, hasHealthProblem: false).stateSymbol == "ellipsis")
-        #expect(MenuBarIcon.make(todoCount: 1, iconState: .reportReady, jiraFailing: false, hasHealthProblem: false).stateSymbol == "checkmark")
-        #expect(MenuBarIcon.make(todoCount: 4, iconState: .idle, jiraFailing: true, hasHealthProblem: false).countText == "?")
+    @Test func test_groupsFollowTheSectionOrderAndPutTheLatestUpdateFirst() {
+        func run(_ id: String, _ status: Run.Status, updatedMinutesAgo: Int) -> Run {
+            var run = Self.run(id: id, status: status, waitingMinutesAgo: status == .waiting ? 1 : nil)
+            run.key = id
+            run.updatedAt = Self.now.addingTimeInterval(-Double(updatedMinutesAgo) * 60)
+            return run
+        }
+        let runs = [
+            run("D-1", .done, updatedMinutesAgo: 50),
+            run("R-1", .running, updatedMinutesAgo: 30),
+            run("D-2", .done, updatedMinutesAgo: 5),
+            run("R-2", .unknown, updatedMinutesAgo: 10),
+        ]
+        let groups = RunGroup.make(runs: runs, now: Self.now, stuckMinutes: [:])
+        #expect(groups.map(\.section) == [.inProgress, .reportReady])
+        #expect(groups.map { $0.lines.map(\.runID) } == [["R-2", "R-1"], ["D-2", "D-1"]])
+        #expect(RunGroup.make(runs: [], now: Self.now, stuckMinutes: [:]).isEmpty)
+    }
+
+    @Test func test_theRepoIsNamedOnlyWhenATicketHasSeveralRuns() {
+        var ios = Self.run(id: "ABC-1--ios")
+        var android = Self.run(id: "ABC-1--android")
+        android.repo = "android"
+        ios.updatedAt = Self.now
+        android.updatedAt = Self.now.addingTimeInterval(-60)
+        let names = RunGroup.make(runs: [ios, android], now: Self.now, stuckMinutes: [:])[0].lines.map(\.name)
+        #expect(names == ["ABC-1 · ios", "ABC-1 · android"])
+    }
+
+    @Test func test_progressFillsTheDotsUpToTheCurrentStepOfRunsNotDone() {
+        #expect(RunLine.stepCount == 10)
+        #expect(RunLine.make(Self.run(step: 6), now: Self.now, stuckMinutes: [:]).filledSteps == 6)
+        #expect(RunLine.make(Self.run(step: 1), now: Self.now, stuckMinutes: [:]).filledSteps == 1)
+        let waiting = Self.run(status: .waiting, step: 3, waitingMinutesAgo: 1)
+        #expect(RunLine.make(waiting, now: Self.now, stuckMinutes: [:]).filledSteps == 3)
+        #expect(RunLine.make(Self.run(status: .unknown, step: 4), now: Self.now, stuckMinutes: [:]).filledSteps == 4)
+        #expect(RunLine.make(Self.run(status: .done, step: 10), now: Self.now, stuckMinutes: [:]).filledSteps == nil)
+        // A step out of range from another plugin version stays within the dots.
+        #expect(RunLine.make(Self.run(step: 14), now: Self.now, stuckMinutes: [:]).filledSteps == 10)
+        #expect(RunLine.make(Self.run(step: -2), now: Self.now, stuckMinutes: [:]).filledSteps == 0)
+    }
+
+    @Test func test_progressReadsAsTheStepOutOfTenWithItsName() {
+        #expect(RunLine.make(Self.run(step: 6), now: Self.now, stuckMinutes: [:]).progressDescription == "Step 6 of 10, Verifying")
+        #expect(RunLine.make(Self.run(status: .done), now: Self.now, stuckMinutes: [:]).progressDescription == nil)
+    }
+
+    @Test func test_showInFinderNamesTheSizeWhenKnown() {
+        var run = Self.run()
+        #expect(RunLine.showInFinderTitle(run, bytes: 5_000_000) == nil)
+        run.worktree = "/Users/me/wt/ios"
+        let size = ByteCountFormatter.string(fromByteCount: 5_000_000, countStyle: .file)
+        #expect(RunLine.showInFinderTitle(run, bytes: 5_000_000) == "Show in Finder · \(size)")
+        #expect(RunLine.showInFinderTitle(run, bytes: nil) == "Show in Finder")
+    }
+
+    @Test func test_menuBarIconShowsWhatNeedsYouAndSetupProblems() {
+        #expect(MenuBarIcon.make(iconState: .idle, hasSetupProblem: false) == MenuBarIcon(badge: nil, showsProblem: false))
+        #expect(MenuBarIcon.make(iconState: .running, hasSetupProblem: false).badge == nil)
+        #expect(MenuBarIcon.make(iconState: .waiting(count: 2), hasSetupProblem: false).badge == "2")
+        #expect(MenuBarIcon.make(iconState: .reportReady, hasSetupProblem: false).badge == "✓")
+        #expect(MenuBarIcon.make(iconState: .reportReady, hasSetupProblem: true) == MenuBarIcon(badge: "✓", showsProblem: true))
+        #expect(MenuBarIcon.make(iconState: .idle, hasSetupProblem: true) == MenuBarIcon(badge: nil, showsProblem: true))
+    }
+
+    @Test func test_menuBarIconTellsVoiceOverWhatItsBadgeMeans() {
+        #expect(MenuBarIcon(badge: nil, showsProblem: false).accessibilityValue == "")
+        #expect(MenuBarIcon(badge: "1", showsProblem: false).accessibilityValue == "1 needs you")
+        #expect(MenuBarIcon(badge: "3", showsProblem: false).accessibilityValue == "3 need you")
+        #expect(MenuBarIcon(badge: "✓", showsProblem: false).accessibilityValue == "Report ready")
+        #expect(MenuBarIcon(badge: "2", showsProblem: true).accessibilityValue == "2 need you, setup needed")
+        #expect(MenuBarIcon(badge: nil, showsProblem: true).accessibilityValue == "Setup needed")
     }
 
     @Test func test_keepsMacAwakeOnlyForRunningRunsThatAreNotStuck() {
@@ -89,17 +200,5 @@ import Testing
         #expect(!SleepPolicy.keepsMacAwake(runs: [], now: Self.now, stuckMinutes: [:]))
         // The configured threshold wins over the default one.
         #expect(!SleepPolicy.keepsMacAwake(runs: [fresh], now: Self.now, stuckMinutes: ["verify": 10]))
-    }
-
-    @Test func test_registryLineShowsWorktreeBranchAndSize() {
-        var run = Self.run()
-        #expect(RegistryLine.make(run, bytes: 5_000_000) == nil)
-        run.worktree = "/repos/ios-wt"
-        run.branch = "abc-1"
-        let size = ByteCountFormatter.string(fromByteCount: 5_000_000, countStyle: .file)
-        #expect(RegistryLine.make(run, bytes: 5_000_000) == "/repos/ios-wt · abc-1 · \(size)")
-        #expect(RegistryLine.make(run, bytes: nil) == "/repos/ios-wt · abc-1")
-        run.branch = nil
-        #expect(RegistryLine.make(run, bytes: 5_000_000) == "/repos/ios-wt · \(size)")
     }
 }

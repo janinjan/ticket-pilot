@@ -77,7 +77,8 @@ public struct NotificationText: Equatable, Sendable {
         }
     }
 
-    private static func fallback(_ kind: String) -> String {
+    /// What a question with no text reads as, by its kind.
+    static func fallback(_ kind: String) -> String {
         switch kind {
         case "go": "Waiting for your go"
         case "launch_app": "Launch the app"

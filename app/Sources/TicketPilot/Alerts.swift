@@ -42,7 +42,7 @@ enum Alerts {
             return field.stringValue
         case .alertThirdButtonReturn:
             // The alert closes rather than reopens: reopening would cover the browser that was just
-            // opened. Set Jira token… in the menu brings it back once the token is copied.
+            // opened. Connect Jira… in the panel (or Set Jira token… in Settings) brings it back.
             NSWorkspace.shared.open(atlassianTokensURL)
             return nil
         default:

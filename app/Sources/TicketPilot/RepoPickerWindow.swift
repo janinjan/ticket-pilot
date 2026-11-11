@@ -19,7 +19,7 @@ final class RepoPickerWindow {
             onStart: onStart,
             onCancel: { [weak self] in self?.close() }
         )
-        let window = NSWindow(contentViewController: NSHostingController(rootView: view))
+        let window = ClosableWindow(contentViewController: NSHostingController(rootView: view))
         window.title = "Start \(issue.key)"
         window.styleMask = [.titled, .closable]
         window.isReleasedWhenClosed = false

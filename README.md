@@ -37,29 +37,46 @@ Install it from the sources (needs Xcode, for `swift`):
 
 The script builds a universal binary, assembles `/Applications/TicketPilot.app` with the version of `.claude-plugin/plugin.json`, signs it ad hoc, quits a running copy and opens the new one. Besides the build folder `app/.build` in the checkout, it writes only `/Applications/TicketPilot.app` (it needs `/Applications` to be writable by you; otherwise it stops and tells you, or drag the app there by hand), removes the old copy at `~/Applications/TicketPilot.app` if there is one, and never uses `sudo`. `swift build` warns that x86_64 is deprecated for the newest macOS target; the warning is expected and harmless. Installing from a release arrives with `/ticket-pilot:setup`.
 
-If the Jira token is missing, open the health submenu and choose "Set Jira token…" to enter it from the menu: it is stored in the Keychain under the `jira.keychainService` of your config (account: your user name). The same alert has a "Create a token on Atlassian" button that opens the page where API tokens are made.
+The menu bar shows the app's mark (three stacked chevrons) and, next to it, only what is worth a look: the number of runs that need you, else a "✓" when a report is ready and not opened yet, else nothing (a run in progress adds nothing). A small "!" means a setup problem: the panel says which. The number of tickets to do is not shown there; it lives in the panel.
+
+A click on it opens a panel (it scrolls when it gets tall), from top to bottom:
+
+- a header with a gear menu: About TicketPilot, Settings…, Send feedback (opens the project's issues page) and Quit TicketPilot (⌘Q);
+- the app's mark in its icon colours (navy and orange; a soft orange ring when a run needs you or the setup must be fixed), with a headline under it: "N need you", what the setup is missing ("Jira isn't connected yet"), "N reports ready", "N in progress", or "All quiet" with the number of tickets to do ("No ticket assigned"), and the key and repo of the run it is about;
+- **Needs you**: a card per run waiting for you, with the question or "Waiting for your go" / "Waiting for your input";
+- **In progress**: a card per run at work, with its step in plain words and its duration ("Coding · 12 min"), ten dots for the ten steps (filled up to the current one), and a "Maybe stuck" tag when a step runs much longer than usual;
+- **Report ready**: a card per finished run ("Done · 36 min"), with "Show in Finder · <size>" for its worktree and, once the ticket is done in Jira, "Release…";
+- **To do**: your tickets to do, by key and summary ("Ready to start" and "Backlog" when both kinds exist), each with Start, and "Open in Jira" in its "⋯" button or its context menu;
+- a setup problem, when there is one, as a single button that fixes it: "Install Claude Code…" (opens its documentation), "Install the ticket-pilot plugin…" (copies the install command), "Connect Jira…" (asks for the token), "Allow Keychain access…", "Jira unreachable — check the network" (checks again), "Repository not found: <name>…", or "Fix the config…". The MCP servers and the disk space are only warnings and never show there.
+
+Every run card has "Open session". VoiceOver reads each card with its ticket, the progress as "Step N of 10" with the step, and each button with the ticket it acts on. Settings and About close with ⌘W. Runs are listed the most recently updated first; the repo is named after the key only when a ticket has runs in several repos.
+
+**Settings…** opens a small window with Open at login, the terminal sessions open in ("Automatic (<the one detected>)" or one of the known terminals installed, or Terminal; the choice is saved as `terminal_app` in your config, every other key kept, and "Automatic" removes the key), Diagnostics (every setup check with ✓ or ✗, its detail, its fix command to copy, and "Set Jira token…" when needed) and Check again. **About TicketPilot** shows the version, the copyright, the license and a link to the source (the issues are behind Send feedback).
+
+If the Jira token is missing, choose "Connect Jira…" in the panel (or "Set Jira token…" in Settings › Diagnostics) to enter it: it is stored in the Keychain under the `jira.keychainService` of your config (account: your user name). The same alert has a "Create a token on Atlassian" button that opens the page where API tokens are made.
 
 The icon source is `app/Resources/AppIcon.svg`; `app/Resources/make-icon.sh` regenerates `app/Resources/AppIcon.icns` from it.
 
-Sessions open in the terminal you already use: `terminal_app` if set, otherwise the known terminal hosting a running `claude`, the only known terminal installed, or the app macOS opens `.command` files with (else Terminal); the menu's health submenu shows which one. "Open session" depends on the session: if it has ended (the plugin's `SessionEnd` hook records this) the app resumes it in a new terminal window, if the run has no session it starts one, and if the session is still running or waiting it brings your terminal to the front and shows "Session open in: <folder>" in the run's submenu so you can find the tab. "Resume" always reopens the session in a new window. With Ghostty 1.3 or later as your terminal (set as `terminal_app` or detected), "Open session" instead focuses the tab whose folder matches the session (using the folder the plugin's hooks last saw it in), or, when no tab matches, resumes the session in a new tab; the first time, macOS asks to let TicketPilot control Ghostty (System Settings › Privacy & Security › Automation), and without it the app falls back to the behaviour above. A session closed without the `SessionEnd` hook (a killed terminal, an older plugin) still shows as open: use "Resume".
+Sessions open in the terminal you already use: `terminal_app` if set, otherwise the known terminal hosting a running `claude`, the only known terminal installed, or the app macOS opens `.command` files with (else Terminal); Settings shows which one. "Open session" on a run card opens its session, depending on the session: if it has ended (the plugin's `SessionEnd` hook records this) the app resumes it in a new terminal window, if the run has no session it starts one, and if the session is still running or waiting it brings your terminal to the front. With Ghostty 1.3 or later as your terminal (set as `terminal_app` or detected), a click instead focuses the tab whose folder matches the session (using the folder the plugin's hooks last saw it in), or, when no tab matches, resumes the session in a new tab; the first time, macOS asks to let TicketPilot control Ghostty (System Settings › Privacy & Security › Automation), and without it the app falls back to the behaviour above. A session closed without the `SessionEnd` hook (a killed terminal, an older plugin) still shows as open with a terminal other than Ghostty, and is only detected as closed once the plugin with that hook is installed.
 
 What it reads:
 
 - the run files `runs/*.json` in the state directory (`~/Library/Application Support/ticket-pilot/`, or `TICKET_PILOT_HOME`);
 - your config (`~/.config/ticket-pilot/config.json`, or `TICKET_PILOT_CONFIG`);
 - your Jira API token, from the Keychain service named by `jira.keychain_service`. The token is never written to a file or a log.
-- the disk usage of each run's worktree (with `du`), shown in that run's submenu.
+- the disk usage of each finished run's worktree (with `du`), shown on that run's card.
 
 What it writes:
 
 - its own state in `app/` inside the state directory (tickets already seen, acknowledged questions, helper scripts);
+- your config, only when you pick a terminal in Settings: it sets or removes `terminal_app` and keeps every other key in place (the file is rewritten pretty-printed, two spaces);
 - when you choose "Release…" for a finished ticket: it removes that run's worktree, then its branch, then its run file, and stops at the first step git refuses. A worktree with uncommitted changes is kept, and so are the branch and the run file. A branch that is not merged is kept with the run file, but the worktree is already removed at that point; the alert gives the `git branch -D` command to run yourself, then "Release…" again finishes the job. It never deletes the repo's main branch or the branch checked out in the repo.
 
-It only reads Jira: it never transitions a ticket, comments or edits a field. It never launches `claude` without a click: a session starts only when you choose it in the menu. The one exception is the setup check, which runs `claude mcp list` when the app starts and on "Check again" to see whether the Atlassian and Figma servers are connected.
+It only reads Jira: it never transitions a ticket, comments or edits a field. It never launches `claude` without a click: a session starts only when you choose it in the panel. The one exception is the setup check, which runs `claude mcp list` when the app starts and on "Check again" (Settings) to see whether the Atlassian and Figma servers are connected.
 
-Permissions: the first launch asks to allow notifications (System Settings > Notifications > TicketPilot). The app is signed ad hoc, so macOS may ask again to allow it to read the Jira token from the Keychain after each reinstall; choose Allow (or Always Allow), then "Check again". The app turns on "Open at login" the first time it starts; you can turn it off in its menu.
+Permissions: the first launch asks to allow notifications (System Settings > Notifications > TicketPilot). The app is signed ad hoc, so macOS may ask again to allow it to read the Jira token from the Keychain after each reinstall; choose Allow (or Always Allow), then "Check again" in Settings. The app turns on "Open at login" the first time it starts; you can turn it off in Settings.
 
-Uninstall: uncheck "Open at login" in the menu, quit the app, then delete `/Applications/TicketPilot.app` (and `~/Applications/TicketPilot.app` if an older install left one). Its state in `app/` can be deleted too; the runs are not affected.
+Uninstall: uncheck "Open at login" in Settings, quit the app, then delete `/Applications/TicketPilot.app` (and `~/Applications/TicketPilot.app` if an older install left one). Its state in `app/` can be deleted too; the runs are not affected.
 
 ## Install
 

@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import TicketPilotCore
 
-@Suite struct TerminalChoiceTests {
+@Suite(.timeLimit(.minutes(1))) struct TerminalChoiceTests {
     private let terminalURL = URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")
 
     private func resolve(
@@ -56,7 +56,7 @@ import Testing
     }
 }
 
-@Suite struct TerminalDetectorTests {
+@Suite(.timeLimit(.minutes(1))) struct TerminalDetectorTests {
     @Test func test_hostIsTheKnownAppAboveClaude() {
         let table = """
             1     0 /sbin/launchd
@@ -140,5 +140,18 @@ import Testing
         defer { try? FileManager.default.removeItem(at: dir) }
         let detector = TerminalDetector(runner: FakeRunner(), applicationDirectories: [dir])
         #expect(detector.installedTerminals() == ["Warp"])
+    }
+
+    @Test func test_pickerOffersTheInstalledKnownTerminalsThenTerminal() {
+        #expect(TerminalChoice.options(installed: [], configured: nil) == ["Terminal"])
+        #expect(TerminalChoice.options(installed: ["warp", "Ghostty"], configured: nil) == ["Ghostty", "Warp", "Terminal"])
+        // A configured terminal stays choosable even when it is not a known one.
+        #expect(TerminalChoice.options(installed: ["Ghostty"], configured: "Alacritty") == ["Ghostty", "Terminal", "Alacritty"])
+        #expect(TerminalChoice.options(installed: ["Ghostty"], configured: "ghostty") == ["Ghostty", "Terminal"])
+        #expect(TerminalChoice.options(installed: [], configured: " ") == ["Terminal"])
+        let options = ["Ghostty", "Terminal"]
+        #expect(TerminalChoice.selectedOption(configured: "ghostty", in: options) == "Ghostty")
+        #expect(TerminalChoice.selectedOption(configured: nil, in: options) == nil)
+        #expect(TerminalChoice.selectedOption(configured: "  ", in: options) == nil)
     }
 }

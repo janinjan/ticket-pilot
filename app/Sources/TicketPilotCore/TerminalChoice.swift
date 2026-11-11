@@ -44,6 +44,26 @@ public struct TerminalChoice: Equatable, Sendable {
         return TerminalChoice(appName: "Terminal")
     }
 
+    /// The terminals Settings offers besides "Automatic": the installed known ones, Terminal, and the
+    /// configured `terminal_app` when it is none of those.
+    public static func options(installed: [String], configured: String?) -> [String] {
+        var names = knownTerminals.filter { name in
+            installed.contains { $0.caseInsensitiveCompare(name) == .orderedSame }
+        } + ["Terminal"]
+        if let name = configured?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty,
+           !names.contains(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) {
+            names.append(name)
+        }
+        return names
+    }
+
+    /// The option of `options` (from `options(installed:configured:)`, which always holds the configured
+    /// name) that `configured` names, nil for "Automatic".
+    public static func selectedOption(configured: String?, in options: [String]) -> String? {
+        guard let name = configured?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { return nil }
+        return options.first { $0.caseInsensitiveCompare(name) == .orderedSame }
+    }
+
     /// The canonical name of a known terminal; "iTerm2" is how iTerm often calls itself.
     static func known(_ name: String) -> String? {
         let name = name.caseInsensitiveCompare("iTerm2") == .orderedSame ? "iTerm" : name

@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import TicketPilotCore
 
-@Suite struct SessionActionTests {
+@Suite(.timeLimit(.minutes(1))) struct SessionActionTests {
     private static func run(sessionID: String?, state: String?) -> Run {
         Run(
             id: "ABC-1--ios", key: "ABC-1", repo: "ios", repoPath: "/r", worktree: nil, branch: nil,
@@ -50,17 +50,5 @@ import Testing
         let bad = try decode(#""session":{"state":"ended","ended_at":"garbage"}"#)
         #expect(bad.session?.state == "ended")
         #expect(bad.session?.endedAt == nil)
-    }
-
-    @Test func openInLineUsesWorktreeThenRepoAbbreviatedWithTilde() {
-        var run = Self.run(sessionID: "s1", state: "running")
-        run.repoPath = "/Users/me/Developer/ios"
-        #expect(SessionAction.openInLine(run, home: "/Users/me") == "Session open in: ~/Developer/ios")
-        run.worktree = "/Users/me/wt/ios"
-        #expect(SessionAction.openInLine(run, home: "/Users/me") == "Session open in: ~/wt/ios")
-        run.worktree = "/Volumes/x/wt"
-        #expect(SessionAction.openInLine(run, home: "/Users/me") == "Session open in: /Volumes/x/wt")
-        run.worktree = "/Users/meow/wt"
-        #expect(SessionAction.openInLine(run, home: "/Users/me") == "Session open in: /Users/meow/wt")
     }
 }

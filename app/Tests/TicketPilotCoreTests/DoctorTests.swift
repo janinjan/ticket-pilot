@@ -97,7 +97,7 @@ private struct TokenError: Error {}
         #expect(checks.map(\.id) == [.claudeCLI, .plugin, .jiraToken, .jiraReachable, .mcp, .repoPaths, .diskSpace])
         let allOk = checks.allSatisfy { $0.ok }
         #expect(allOk)
-        #expect(!checks.hasProblem)
+        #expect(checks.allSatisfy { $0.ok })
         #expect(checks.canStart(repo: "ios"))
         let plugin = try check(checks, .plugin)
         #expect(plugin.detail == "0.4.2")
@@ -186,10 +186,10 @@ private struct TokenError: Error {}
         let refusedByJira = await (try makeDoctor(fixture, jira: FakeJira(.unauthorized))).run()
         let keychainFailed = await (try makeDoctor(fixture, jira: nil, token: { throw KeychainError.unexpected(-128) })).run()
         let healthy = await (try makeDoctor(fixture)).run()
-        #expect(missing.needsToken)
-        #expect(refusedByJira.needsToken)
-        #expect(!keychainFailed.needsToken)
-        #expect(!healthy.needsToken)
+        #expect(try check(missing, .jiraToken).needsToken)
+        #expect(try check(refusedByJira, .jiraToken).needsToken)
+        #expect(try !check(keychainFailed, .jiraToken).needsToken)
+        #expect(try !check(healthy, .jiraToken).needsToken)
     }
 
     @Test func test_httpErrorPointsAtTheSite() async throws {
@@ -215,7 +215,7 @@ private struct TokenError: Error {}
         #expect(!mcp.blocksStart)
         #expect(mcp.detail.contains("atlassian"))
         #expect(!mcp.detail.contains("figma"))
-        #expect(checks.hasProblem)
+        #expect(!checks.allSatisfy { $0.ok })
         #expect(checks.canStart(repo: "ios"))
     }
 
@@ -263,7 +263,7 @@ private struct TokenError: Error {}
         #expect(!disk.ok)
         #expect(!disk.blocksStart)
         #expect(checks.canStart(repo: "ios"))
-        #expect(checks.hasProblem)
+        #expect(!checks.allSatisfy { $0.ok })
     }
 
     @Test func unknownDiskSpaceIsOk() async throws {
@@ -287,22 +287,11 @@ private struct TokenError: Error {}
         #expect([disk, missingRepo].startBlocker(for: .pick([])) == nil)
         #expect([disk, noClaude].startBlocker(for: .pick([])) == noClaude)
         #expect([disk].startBlocker(repo: "ios") == nil)
-        #expect([disk, noClaude].firstProblem == disk)
-        #expect([HealthCheck(id: .mcp, ok: true, detail: "ok")].firstProblem == nil)
     }
 
     @Test func test_everyCheckHasItsOwnTitle() {
         let titles = HealthCheck.Kind.allCases.map(\.title)
         #expect(Set(titles).count == titles.count)
         #expect(!titles.contains(""))
-    }
-
-    @Test func test_summaryPriority() {
-        let disk = HealthCheck(id: .diskSpace, ok: false, detail: "Only 2.0 GB free")
-        let mcp = HealthCheck(id: .mcp, ok: true, detail: "ok")
-        #expect([disk].summary(configError: "not found at /c.json") == "Config: not found at /c.json")
-        #expect([HealthCheck]().summary(configError: nil) == "Checking…")
-        #expect([mcp, disk].summary(configError: nil) == "Disk space: Only 2.0 GB free")
-        #expect([mcp].summary(configError: nil) == "All good")
     }
 }

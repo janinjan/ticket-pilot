@@ -18,12 +18,3 @@ public enum SessionAction: Equatable, Sendable {
         }
     }
 }
-
-extension SessionAction {
-    /// "Session open in: <folder>": the run's worktree, else its repo, with the home folder shown as `~`.
-    public static func openInLine(_ run: Run, home: String = NSHomeDirectory()) -> String {
-        let folder = run.worktree ?? run.repoPath
-        let shown = folder == home ? "~" : folder.hasPrefix(home + "/") ? "~" + folder.dropFirst(home.count) : folder
-        return "Session open in: \(shown)"
-    }
-}

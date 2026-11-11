@@ -1,13 +1,14 @@
 import AppKit
 import Observation
+import SwiftUI
 import UniformTypeIdentifiers
 import TicketPilotCore
 
-/// The app state shown in the menu, and every action the menu or a notification can trigger.
+/// The app state shown in the panel, and every action the panel, Settings or a notification can trigger.
 @MainActor @Observable
 final class AppModel {
     private(set) var todo = TodoList(issues: [], readyStatuses: [])
-    private(set) var runLines: [RunLine] = []
+    private(set) var runGroups: [RunGroup] = []
     private(set) var iconState: RunIconState = .idle
     /// Also true while there is no valid config or no token: Jira is not read at all.
     private(set) var jiraFailing = false
@@ -17,23 +18,59 @@ final class AppModel {
     private(set) var openAtLogin = false
     /// Disk usage of each run's worktree, by run id.
     private(set) var diskUsage: [String: Int64] = [:]
-    /// The check whose fix command was just copied: the menu shows "Copied ✓" for a few seconds.
+    /// The check whose fix command was just copied: it reads "Copied ✓" for a few seconds.
     private(set) var copiedFix: HealthCheck.Kind?
     /// The terminal sessions open in, resolved at launch and on "Check again".
     private(set) var terminalChoice = TerminalChoice(appName: "Terminal")
+    /// The terminal picked when `terminal_app` is not set, shown as "Automatic (<name>)" in Settings;
+    /// nil while it is being detected.
+    private(set) var automaticTerminal: TerminalChoice?
+    /// The known terminals found in the application folders.
+    private(set) var installedTerminals: [String] = []
+    /// `terminal_app` in the config, if set.
+    private(set) var configuredTerminal: String?
+    /// False until Jira first answered: until then the panel claims nothing about the tickets.
+    private(set) var jiraAnswered = false
+    private(set) var runs: [Run] = []
+    private(set) var acknowledged: Set<String> = []
 
     /// `UNUserNotificationCenter` and `SMAppService` need a `.app` bundle.
     let hasBundle = Bundle.main.bundleIdentifier != nil
 
     var icon: MenuBarIcon {
-        MenuBarIcon.make(
-            todoCount: todo.count, iconState: iconState, jiraFailing: jiraFailing,
-            hasHealthProblem: health.hasProblem || configError != nil
+        MenuBarIcon.make(iconState: iconState, hasSetupProblem: setupProblem != nil)
+    }
+
+    /// The problem the panel offers to fix, if any.
+    var setupProblem: SetupProblem? {
+        SetupProblem.first(in: health, configError: configError, jiraFailing: jiraFailing)
+    }
+
+    /// The setup button: "Copied ✓" for a few seconds once its fix command is copied.
+    var setupProblemTitle: String? {
+        guard let setupProblem else { return nil }
+        if case let .copyFix(check) = setupProblem.action, copiedFix == check.id { return "Copied ✓" }
+        return setupProblem.title
+    }
+
+    /// The headline under the panel's big mark.
+    var status: PanelStatus {
+        PanelStatus.make(
+            runs: runs,
+            acknowledgedDone: acknowledged,
+            setupProblem: setupProblem,
+            todoCount: jiraAnswered ? todo.ready.count + todo.backlog.count : nil
         )
     }
 
-    var healthSummary: String {
-        health.summary(configError: configError)
+    /// The terminals Settings offers besides "Automatic".
+    var terminalOptions: [String] {
+        TerminalChoice.options(installed: installedTerminals, configured: configuredTerminal)
+    }
+
+    /// The Settings choice for `terminal_app`: nil for "Automatic".
+    var selectedTerminal: String? {
+        TerminalChoice.selectedOption(configured: configuredTerminal, in: terminalOptions)
     }
 
     @ObservationIgnored private let paths = StatePaths()
@@ -46,14 +83,14 @@ final class AppModel {
     @ObservationIgnored private let untimedRunner = SystemProcessRunner()
     @ObservationIgnored private let sleepGuard = SleepGuard()
     @ObservationIgnored private let picker = RepoPickerWindow()
+    @ObservationIgnored private let settingsWindow = AuxiliaryWindow()
+    @ObservationIgnored private let aboutWindow = AuxiliaryWindow()
     @ObservationIgnored private var config: AppConfig?
     @ObservationIgnored private var poller: JiraPoller?
     @ObservationIgnored private var notifier: Notifier?
     @ObservationIgnored private var watcher: RunWatcher?
     @ObservationIgnored private var issues: [JiraIssue] = []
-    @ObservationIgnored private var runs: [Run] = []
     @ObservationIgnored private var needsYou = NeedsYouTracker()
-    @ObservationIgnored private var acknowledged: Set<String> = []
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
     @ObservationIgnored private var clockTask: Task<Void, Never>?
     @ObservationIgnored private var terminalTask: Task<Void, Never>?
@@ -148,18 +185,28 @@ final class AppModel {
     /// new one arrives, and `afterTerminalResolved` holds back the actions that need it.
     private func resolveTerminal(configured: String?) {
         terminalTask?.cancel()
+        automaticTerminal = nil
         let task = Task { [weak self] in
-            let choice = await Task.detached { () -> TerminalChoice in
+            let (choice, automatic, installed) = await Task.detached {
+                () -> (TerminalChoice, TerminalChoice, [String]) in
                 let detector = TerminalDetector(runner: SystemProcessRunner(timeout: 5))
-                return TerminalChoice.resolve(
-                    configured: configured,
-                    hostOfRunningClaude: detector.hostOfRunningClaude(),
-                    installedTerminals: detector.installedTerminals(),
-                    systemDefault: Self.systemShellScriptApp()
-                )
+                let host = detector.hostOfRunningClaude()
+                let installed = detector.installedTerminals()
+                let systemDefault = Self.systemShellScriptApp()
+                func resolve(_ configured: String?) -> TerminalChoice {
+                    TerminalChoice.resolve(
+                        configured: configured,
+                        hostOfRunningClaude: host,
+                        installedTerminals: installed,
+                        systemDefault: systemDefault
+                    )
+                }
+                return (resolve(configured), resolve(nil), installed)
             }.value
             guard !Task.isCancelled, let self else { return }
             terminalChoice = choice
+            automaticTerminal = automatic
+            installedTerminals = installed
             terminalTask = nil
         }
         terminalTask = task
@@ -184,9 +231,11 @@ final class AppModel {
         do {
             config = try AppConfig.load(from: paths.configFile)
             configError = nil
+            configuredTerminal = config?.terminalApp
             resolveTerminal(configured: config?.terminalApp)
         } catch {
             config = nil
+            configuredTerminal = nil
             configError = switch error {
             case let .missing(path): "not found at \(path)"
             case let .invalid(message): message
@@ -202,6 +251,7 @@ final class AppModel {
             jiraFailing = true
         case let .succeeded(issues, newTickets):
             jiraFailing = false
+            jiraAnswered = true
             self.issues = issues
             todo = TodoList(issues: issues, readyStatuses: config?.readyStatuses ?? [])
             newTickets.forEach { notifier?.notifyNewTicket($0) }
@@ -243,21 +293,29 @@ final class AppModel {
         iconState = RunIconState.make(runs: runs, acknowledgedDone: acknowledged)
         let now = Date()
         let stuckMinutes = config?.stuckMinutes ?? [:]
-        runLines = runs.map { RunLine.make($0, now: now, stuckMinutes: stuckMinutes) }
+        runGroups = RunGroup.make(runs: runs, now: now, stuckMinutes: stuckMinutes)
         sleepGuard.update(anyRunning: SleepPolicy.keepsMacAwake(runs: runs, now: now, stuckMinutes: stuckMinutes))
     }
 
-    func registryLine(runID: String) -> String? {
-        runs.first { $0.id == runID }.flatMap { RegistryLine.make($0, bytes: diskUsage[runID]) }
+    /// "Show in Finder · <size>" for a run with a worktree.
+    func showInFinderTitle(runID: String) -> String? {
+        runs.first { $0.id == runID }.flatMap { RunLine.showInFinderTitle($0, bytes: diskUsage[runID]) }
     }
 
-    /// Measures each worktree off the main actor, again only when its run file changed.
+    /// Reveals the run's worktree in the Finder.
+    func revealWorktree(runID: String) {
+        guard let path = runs.first(where: { $0.id == runID })?.worktree else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+    }
+
+    /// Measures the worktree of each finished run off the main actor, again only when its run file changed.
     private func measureDiskUsage() {
-        let ids = Set(runs.map(\.id))
+        let finished = runs.filter { $0.status == .done }
+        let ids = Set(finished.map(\.id))
         diskUsage = diskUsage.filter { ids.contains($0.key) }
         measuredAt = measuredAt.filter { ids.contains($0.key) }
         let runner = untimedRunner
-        for run in runs {
+        for run in finished {
             guard let worktree = run.worktree, measuredAt[run.id] != run.updatedAt else { continue }
             measuredAt[run.id] = run.updatedAt
             let runID = run.id
@@ -412,14 +470,6 @@ final class AppModel {
         }
     }
 
-    /// The disabled "Session open in: <folder>" line, shown while the run's session is live in a terminal tab.
-    func sessionFolderLine(runID: String) -> String? {
-        guard let run = runs.first(where: { $0.id == runID }), SessionAction.forOpening(run) == .bringToFront else {
-            return nil
-        }
-        return SessionAction.openInLine(run)
-    }
-
     func resume(runID: String) {
         afterTerminalResolved { [self] in resumeNow(runID: runID) }
     }
@@ -483,7 +533,39 @@ final class AppModel {
         ))
     }
 
-    // MARK: - Settings and notifications
+    // MARK: - Settings, About and notifications
+
+    func showSettings() {
+        settingsWindow.show(title: "TicketPilot Settings", resizable: true) { SettingsView(model: self) }
+    }
+
+    func showAbout() {
+        aboutWindow.show(title: "About TicketPilot") { AboutView() }
+    }
+
+    func sendFeedback() {
+        NSWorkspace.shared.open(AboutView.issuesURL)
+    }
+
+    /// Writes `terminal_app` into the config (nil removes it, for "Automatic"), every other key kept.
+    func setTerminalApp(_ name: String?) {
+        guard name != selectedTerminal else { return }
+        // A symlinked config is edited where it points, not replaced by a plain file.
+        let file = paths.configFile.resolvingSymlinksInPath()
+        do {
+            let data = try Data(contentsOf: file)
+            try ConfigEditor.setTerminalApp(name, in: data).write(to: file, options: .atomic)
+        } catch {
+            let detail = switch error {
+            case ConfigEditError.invalidJSON: "\(file.path) is not valid JSON."
+            case ConfigEditError.notAnObject: "\(file.path) does not hold a JSON object."
+            case ConfigEditError.invalidName: "This terminal name cannot be saved."
+            default: error.localizedDescription
+            }
+            Alerts.show(AlertText(title: "The terminal was not changed", message: detail))
+        }
+        runDoctor()
+    }
 
     func setOpenAtLogin(_ enabled: Bool) {
         guard hasBundle else { return }
@@ -495,11 +577,24 @@ final class AppModel {
         openAtLogin = LoginItem.isEnabled
     }
 
+    /// Does what the setup button offers for the setup problem.
+    func fixSetupProblem() {
+        guard let setupProblem else { return }
+        switch setupProblem.action {
+        case let .openURL(url): NSWorkspace.shared.open(url)
+        case let .copyFix(check): copyFix(of: check)
+        case .setJiraToken: setJiraToken()
+        case let .explain(text): Alerts.show(text)
+        case .checkAgain: runDoctor()
+        }
+    }
+
     func copyFix(of check: HealthCheck) {
         guard let fix = check.fix else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(fix, forType: .string)
         notifier?.notifyCopied()
+        AccessibilityNotification.Announcement("Copied").post()
         copiedFix = check.id
         copiedTask?.cancel()
         copiedTask = Task { [weak self] in
