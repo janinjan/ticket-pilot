@@ -47,6 +47,13 @@ mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
 cp "$binary" "$bundle/Contents/MacOS/TicketPilot"
 sed "s/__VERSION__/$version/g" app/Resources/Info.plist > "$bundle/Contents/Info.plist"
 cp app/Resources/AppIcon.icns "$bundle/Contents/Resources/"
+# The Claude Code plugin the app installs or updates: only what the plugin needs (never app/, tests/ or
+# the repository's own folders), signed with the bundle.
+plugin="$bundle/Contents/Resources/plugin"
+mkdir -p "$plugin"
+cp -R .claude-plugin skills agents hooks bin ticket_pilot "$plugin/"
+cp LICENSE README.md config.example.json "$plugin/"
+find "$plugin" \( -name __pycache__ -o -name '*.pyc' -o -name .DS_Store \) -prune -exec rm -rf {} +
 codesign --force --sign - "$bundle"
 
 if pgrep -x TicketPilot >/dev/null 2>&1; then

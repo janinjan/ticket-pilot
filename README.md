@@ -23,7 +23,7 @@ Progress is tracked per run in the ticket-pilot state directory, so a stopped ru
 
 The plugin also ships a read-only `reviewer` agent, a read-only `auditor` agent, hooks that track which Claude Code session belongs to which run (and when it ends), and the `tp` command line tool.
 
-A macOS menu bar app that shows your runs and the questions waiting for you ships in this repository; see [Menu bar app](#menu-bar-app).
+A macOS menu bar app that shows your runs and the questions waiting for you ships in this repository; see [Menu bar app](#menu-bar-app). Install the app; it offers to install or update the Claude Code plugin it carries.
 
 ## Menu bar app
 
@@ -35,7 +35,14 @@ Install it from the sources (needs Xcode, for `swift`):
 ./install.sh --from-source
 ```
 
-The script builds a universal binary, assembles `/Applications/TicketPilot.app` with the version of `.claude-plugin/plugin.json`, signs it ad hoc, quits a running copy and opens the new one. Besides the build folder `app/.build` in the checkout, it writes only `/Applications/TicketPilot.app` (it needs `/Applications` to be writable by you; otherwise it stops and tells you, or drag the app there by hand), removes the old copy at `~/Applications/TicketPilot.app` if there is one, and never uses `sudo`. `swift build` warns that x86_64 is deprecated for the newest macOS target; the warning is expected and harmless. Installing from a release arrives with `/ticket-pilot:setup`.
+The script builds a universal binary, assembles `/Applications/TicketPilot.app` with the version of `.claude-plugin/plugin.json` and a copy of the plugin in `Contents/Resources/plugin` (its manifests, skills, agents, hooks, `bin/`, `ticket_pilot/`, the license, this README and `config.example.json`; never `app/` or `tests/`), signs it ad hoc, quits a running copy and opens the new one. Besides the build folder `app/.build` in the checkout, it writes only `/Applications/TicketPilot.app` (it needs `/Applications` to be writable by you; otherwise it stops and tells you, or drag the app there by hand), removes the old copy at `~/Applications/TicketPilot.app` if there is one, and never uses `sudo`. `swift build` warns that x86_64 is deprecated for the newest macOS target; the warning is expected and harmless. Installing from a release arrives with `/ticket-pilot:setup`.
+
+Install the app; it offers to install or update the Claude Code plugin it carries. When the plugin is missing, or older than the copy in the app, the panel shows "Install the Claude Code plugin…" or "Update the Claude Code plugin (<installed> → <carried>)…" (Settings › Diagnostics has the same as "Install…" or "Update…"). The app first reads `claude plugin marketplace list`, then shows the exact commands it will run and waits for Install:
+
+- if a marketplace named `ticket-pilot` is already configured (for example from GitHub), it stays the source: `claude plugin marketplace update ticket-pilot`, then `claude plugin update ticket-pilot@ticket-pilot` (or `claude plugin install ticket-pilot@ticket-pilot` when the plugin is not installed);
+- otherwise the copy inside the app becomes the marketplace: `claude plugin marketplace add /Applications/TicketPilot.app/Contents/Resources/plugin`, then `claude plugin install ticket-pilot@ticket-pilot`.
+
+A failed command is shown with its error output; after a success, restart your Claude Code sessions to use the plugin. A plugin newer than the app's copy (a newer release, a local checkout) is left alone. Installing the plugin alone, without the app, still works: see [Install](#install).
 
 The menu bar shows the app's mark (three stacked chevrons) and, next to it, only what is worth a look: the number of runs that need you, else a "✓" when a report is ready and not opened yet, else nothing (a run in progress adds nothing). A small "!" means a setup problem: the panel says which. The number of tickets to do is not shown there; it lives in the panel.
 
@@ -47,11 +54,11 @@ A click on it opens a panel (it scrolls when it gets tall), from top to bottom:
 - **In progress**: a card per run at work, with its step in plain words and its duration ("Coding · 12 min"), ten dots for the ten steps (filled up to the current one), and a "Maybe stuck" tag when a step runs much longer than usual;
 - **Report ready**: a card per finished run ("Done · 36 min"), with "Show in Finder · <size>" for its worktree and, once the ticket is done in Jira, "Release…";
 - **To do**: your tickets to do, by key and summary ("Ready to start" and "Backlog" when both kinds exist), each with Start, and "Open in Jira" in its "⋯" button or its context menu;
-- a setup problem, when there is one, as a single button that fixes it: "Install Claude Code…" (opens its documentation), "Install the ticket-pilot plugin…" (copies the install command), "Connect Jira…" (asks for the token), "Allow Keychain access…", "Jira unreachable — check the network" (checks again), "Repository not found: <name>…", or "Fix the config…". The MCP servers and the disk space are only warnings and never show there.
+- a setup problem, when there is one, as a single button that fixes it: "Install Claude Code…" (opens its documentation), "Install the Claude Code plugin…" (installs the plugin the app carries, after showing the commands), "Connect Jira…" (asks for the token), "Allow Keychain access…", "Jira unreachable — check the network" (checks again), "Repository not found: <name>…", or "Fix the config…"; last, "Update the Claude Code plugin (<installed> → <carried>)…", since an older plugin still runs. The MCP servers and the disk space are only warnings and never show there.
 
 Every run card has "Open session". VoiceOver reads each card with its ticket, the progress as "Step N of 10" with the step, and each button with the ticket it acts on. Settings and About close with ⌘W. Runs are listed the most recently updated first; the repo is named after the key only when a ticket has runs in several repos.
 
-**Settings…** opens a small window with Open at login, the terminal sessions open in ("Automatic (<the one detected>)" or one of the known terminals installed, or Terminal; the choice is saved as `terminal_app` in your config, every other key kept, and "Automatic" removes the key), Diagnostics (every setup check with ✓ or ✗, its detail, its fix command to copy, and "Set Jira token…" when needed) and Check again. **About TicketPilot** shows the version, the copyright, the license and a link to the source (the issues are behind Send feedback).
+**Settings…** opens a small window with Open at login, the terminal sessions open in ("Automatic (<the one detected>)" or one of the known terminals installed, or Terminal; the choice is saved as `terminal_app` in your config, every other key kept, and "Automatic" removes the key), Diagnostics (every setup check with ✓ or ✗, its detail, its fix command to copy, and "Set Jira token…" when needed; the plugin line reads "installed <version> · bundled <version>") and Check again. **About TicketPilot** shows the version, the copyright, the license and a link to the source (the issues are behind Send feedback).
 
 If the Jira token is missing, choose "Connect Jira…" in the panel (or "Set Jira token…" in Settings › Diagnostics) to enter it: it is stored in the Keychain under the `jira.keychainService` of your config (account: your user name). The same alert has a "Create a token on Atlassian" button that opens the page where API tokens are made.
 
@@ -72,7 +79,7 @@ What it writes:
 - your config, only when you pick a terminal in Settings: it sets or removes `terminal_app` and keeps every other key in place (the file is rewritten pretty-printed, two spaces);
 - when you choose "Release…" for a finished ticket: it removes that run's worktree, then its branch, then its run file, and stops at the first step git refuses. A worktree with uncommitted changes is kept, and so are the branch and the run file. A branch that is not merged is kept with the run file, but the worktree is already removed at that point; the alert gives the `git branch -D` command to run yourself, then "Release…" again finishes the job. It never deletes the repo's main branch or the branch checked out in the repo.
 
-It only reads Jira: it never transitions a ticket, comments or edits a field. It never launches `claude` without a click: a session starts only when you choose it in the panel. The one exception is the setup check, which runs `claude mcp list` when the app starts and on "Check again" (Settings) to see whether the Atlassian and Figma servers are connected.
+It only reads Jira: it never transitions a ticket, comments or edits a field. It never launches `claude` without a click: a session starts only when you choose it in the panel. The one exception is the setup check, which runs `claude mcp list` when the app starts and on "Check again" (Settings) to see whether the Atlassian and Figma servers are connected. Installing or updating the plugin runs `claude plugin` commands only after you click its button and confirm the commands listed.
 
 Permissions: the first launch asks to allow notifications (System Settings > Notifications > TicketPilot). The app is signed ad hoc, so macOS may ask again to allow it to read the Jira token from the Keychain after each reinstall; choose Allow (or Always Allow), then "Check again" in Settings. The app turns on "Open at login" the first time it starts; you can turn it off in Settings.
 
@@ -87,7 +94,7 @@ Requirements:
 - git
 - The Atlassian and Figma MCP servers are recommended for step 1 (reading tickets, Confluence pages and designs). Without them the skill lists those sources as unread.
 
-From a marketplace (replace `<owner>` with the GitHub owner hosting this repository):
+The simplest path on macOS is the [menu bar app](#menu-bar-app): install the app; it offers to install or update the Claude Code plugin it carries. To install the plugin alone, from a marketplace (replace `<owner>` with the GitHub owner hosting this repository):
 
 ```sh
 claude plugin marketplace add <owner>/ticket-pilot

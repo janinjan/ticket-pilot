@@ -33,6 +33,8 @@ final class AppModel {
     private(set) var jiraAnswered = false
     private(set) var runs: [Run] = []
     private(set) var acknowledged: Set<String> = []
+    /// True from the plugin install's confirmation until its last command has run.
+    private(set) var installingPlugin = false
 
     /// `UNUserNotificationCenter` and `SMAppService` need a `.app` bundle.
     let hasBundle = Bundle.main.bundleIdentifier != nil
@@ -78,6 +80,8 @@ final class AppModel {
     @ObservationIgnored private var ghosttyAlertsShown: Set<String> = []
     @ObservationIgnored private var ghosttyBusyRuns: Set<String> = []
     @ObservationIgnored private let ghosttyRunner = SystemProcessRunner(timeout: 300)
+    /// `claude plugin marketplace update` may clone a repository: generous, but finite.
+    @ObservationIgnored private let pluginRunner = SystemProcessRunner(timeout: 300)
     /// For `git worktree remove` and `du` on a big worktree, which must not be killed midway.
     /// Only used off the main actor.
     @ObservationIgnored private let untimedRunner = SystemProcessRunner()
@@ -164,7 +168,8 @@ final class AppModel {
                 runner: runner,
                 jira: jira,
                 tokenLookup: { try token.get() },
-                freeBytes: freeBytesOnHomeVolume
+                freeBytes: freeBytesOnHomeVolume,
+                bundledPluginManifest: Doctor.bundledPluginManifest(resources: Bundle.main.resourceURL)
             )
             let checks = await Task.detached { await doctor.run() }.value
             guard !Task.isCancelled else { return }
@@ -586,6 +591,66 @@ final class AppModel {
         case .setJiraToken: setJiraToken()
         case let .explain(text): Alerts.show(text)
         case .checkAgain: runDoctor()
+        case let .installPlugin(state): installPlugin(state)
+        }
+    }
+
+    // MARK: - Plugin
+
+    /// The plugin copy inside the app bundle, if this is a bundle that carries one.
+    private var bundledPlugin: URL? {
+        guard let url = Bundle.main.resourceURL?.appendingPathComponent("plugin", isDirectory: true),
+              FileManager.default.fileExists(atPath: url.appendingPathComponent(".claude-plugin/plugin.json").path)
+        else { return nil }
+        return url
+    }
+
+    /// Reads the configured marketplaces, lists the commands it will run and asks first; then runs them and
+    /// checks the setup again. Nothing runs without the confirmation.
+    func installPlugin(_ state: PluginState) {
+        guard !installingPlugin, let claudePath = health.claudePath else { return }
+        installingPlugin = true
+        let installer = PluginInstaller(claudePath: claudePath, bundledPlugin: bundledPlugin, runner: pluginRunner)
+        let installed = state != .missing
+        Task { [weak self] in
+            let plan = await Task.detached {
+                Result<[PluginCommand], PluginInstallError> { () throws(PluginInstallError) in
+                    try installer.plan(pluginInstalled: installed)
+                }
+            }.value
+            guard let self else { return }
+            let commands: [PluginCommand]
+            switch plan {
+            case let .success(planned): commands = planned
+            case let .failure(error):
+                installingPlugin = false
+                Alerts.show(error.alertText)
+                return
+            }
+            guard Alerts.confirm(PluginInstaller.confirmation(commands), button: "Install") else {
+                installingPlugin = false
+                return
+            }
+            let outcome = await Task.detached {
+                Result<[PluginCommandResult], PluginInstallError> { () throws(PluginInstallError) in
+                    try installer.run(commands)
+                }
+            }.value
+            installingPlugin = false
+            switch outcome {
+            case let .success(results):
+                let log = results.map { result in
+                    let output = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+                    return output.isEmpty ? result.command.display : "\(result.command.display)\n\(output)"
+                }
+                Alerts.show(AlertText(
+                    title: "Plugin installed — restart your Claude Code sessions to use it",
+                    message: log.joined(separator: "\n\n")
+                ))
+            case let .failure(error):
+                Alerts.show(error.alertText)
+            }
+            runDoctor()
         }
     }
 

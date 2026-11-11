@@ -40,6 +40,10 @@ struct SettingsView: View {
                     CheckRow(ok: check.ok, title: check.id.title, detail: check.detail, fix: check.fix) {
                         if check.id == .jiraToken, !check.ok, check.needsToken {
                             Button("Set Jira token…", action: model.setJiraToken)
+                        } else if let state = check.pluginState, state.needsInstall, model.health.claudePath != nil {
+                            Button(state == .missing ? "Install…" : "Update…") { model.installPlugin(state) }
+                                .disabled(model.installingPlugin)
+                                .accessibilityLabel(state == .missing ? "Install the plugin" : "Update the plugin")
                         } else if check.fix != nil {
                             Button(model.copiedFix == check.id ? "Copied ✓" : "Copy fix command") {
                                 model.copyFix(of: check)

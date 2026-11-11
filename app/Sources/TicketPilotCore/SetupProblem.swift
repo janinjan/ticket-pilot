@@ -12,6 +12,8 @@ public struct SetupProblem: Equatable, Sendable {
         case explain(AlertText)
         /// Runs the setup check again.
         case checkAgain
+        /// Installs or updates the Claude Code plugin the app carries.
+        case installPlugin(PluginState)
     }
 
     /// The button that fixes it ("Connect Jira…").
@@ -29,7 +31,8 @@ public struct SetupProblem: Equatable, Sendable {
     static let claudeCodeURL = URL(string: "https://docs.claude.com/claude-code")!
 
     /// In order: a config error, Claude Code missing, the plugin missing, the Jira token to enter, the
-    /// Keychain refusing access, Jira unreachable (or failing to answer the poll), a repo path missing.
+    /// Keychain refusing access, Jira unreachable (or failing to answer the poll), a repo path missing, an
+    /// older plugin than the one the app carries (it still runs, so the update comes last).
     /// `jiraFailing` only counts once the checks are in, so a missing token is not shown as unreachable first.
     /// The other failed checks (MCP servers, disk space) are only warnings: they stay in Diagnostics.
     public static func first(in checks: [HealthCheck], configError: String? = nil, jiraFailing: Bool = false) -> SetupProblem? {
@@ -48,11 +51,12 @@ public struct SetupProblem: Equatable, Sendable {
                 title: "Install Claude Code…", headline: "Claude Code isn't installed yet", action: .openURL(claudeCodeURL)
             )
         }
-        if let plugin = failed(.plugin) {
+        let plugin = failed(.plugin)?.pluginState
+        if plugin == .missing {
             return SetupProblem(
-                title: "Install the ticket-pilot plugin…",
-                headline: "The ticket-pilot plugin isn't installed yet",
-                action: .copyFix(plugin)
+                title: "Install the Claude Code plugin…",
+                headline: "The Claude Code plugin isn't installed yet",
+                action: .installPlugin(.missing)
             )
         }
         if let token = failed(.jiraToken) {
@@ -81,6 +85,13 @@ public struct SetupProblem: Equatable, Sendable {
                     title: "Repository not found",
                     message: repos.detail + "\n\nCorrect the repo path in your config, then choose Check again."
                 ))
+            )
+        }
+        if let plugin, case let .outdated(installed, bundled) = plugin {
+            return SetupProblem(
+                title: "Update the Claude Code plugin (\(installed) → \(bundled))…",
+                headline: "A newer Claude Code plugin is ready",
+                action: .installPlugin(plugin)
             )
         }
         return nil

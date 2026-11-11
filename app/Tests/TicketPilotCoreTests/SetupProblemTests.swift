@@ -4,7 +4,12 @@ import Testing
 
 @Suite struct SetupProblemTests {
     static let claude = HealthCheck(id: .claudeCLI, ok: false, detail: "Claude Code not found", fix: "Install", blocksStart: true)
-    static let plugin = HealthCheck(id: .plugin, ok: false, detail: "not installed", fix: "claude plugin install x", blocksStart: true)
+    static let plugin = HealthCheck(
+        id: .plugin, ok: false, detail: "not installed", fix: "claude plugin install x", blocksStart: true, pluginState: .missing
+    )
+    static let outdated = HealthCheck(
+        id: .plugin, ok: false, detail: "installed 0.1.2 · bundled 0.1.3", pluginState: .outdated(installed: "0.1.2", bundled: "0.1.3")
+    )
     static let noToken = HealthCheck(id: .jiraToken, ok: false, detail: "No Jira token", fix: "security …", blocksStart: true, needsToken: true)
     static let keychain = HealthCheck(id: .jiraToken, ok: false, detail: "Keychain refused", fix: "Allow TicketPilot", blocksStart: true)
     static let unreachable = HealthCheck(id: .jiraReachable, ok: false, detail: "Jira is unreachable", fix: "Check the network", blocksStart: true)
@@ -22,13 +27,25 @@ import Testing
         ))
     }
 
-    @Test func test_pluginMissingCopiesTheInstallCommand() {
+    @Test func test_pluginMissingOffersToInstallIt() {
         let problem = SetupProblem.first(in: [Self.noToken, Self.plugin])
         #expect(problem == SetupProblem(
-            title: "Install the ticket-pilot plugin…",
-            headline: "The ticket-pilot plugin isn't installed yet",
-            action: .copyFix(Self.plugin)
+            title: "Install the Claude Code plugin…",
+            headline: "The Claude Code plugin isn't installed yet",
+            action: .installPlugin(.missing)
         ))
+    }
+
+    @Test func test_pluginOutdatedOffersToUpdateItAfterJira() {
+        let state = PluginState.outdated(installed: "0.1.2", bundled: "0.1.3")
+        #expect(SetupProblem.first(in: [Self.outdated, Self.disk]) == SetupProblem(
+            title: "Update the Claude Code plugin (0.1.2 → 0.1.3)…",
+            headline: "A newer Claude Code plugin is ready",
+            action: .installPlugin(state)
+        ))
+        // An update can wait: what blocks a run comes first.
+        #expect(SetupProblem.first(in: [Self.outdated, Self.noToken])?.action == .setJiraToken)
+        #expect(SetupProblem.first(in: [Self.outdated, Self.repos])?.title == "Repository not found: ios, web…")
     }
 
     @Test func test_missingTokenConnectsJira() {

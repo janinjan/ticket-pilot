@@ -50,6 +50,39 @@ class InstallScriptTests(unittest.TestCase):
         self.assertIn('mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"', self.text)
         self.assertLess(self.text.index(copy), self.text.index("codesign --force"))
 
+    def plugin_copy_lines(self):
+        return [l.strip() for l in self.text.splitlines() if '"$plugin/"' in l and l.strip().startswith("cp ")]
+
+    def test_script_embeds_the_plugin_before_signing(self):
+        self.assertIn('plugin="$bundle/Contents/Resources/plugin"', self.text)
+        self.assertIn('mkdir -p "$plugin"', self.text)
+        copies = self.plugin_copy_lines()
+        self.assertEqual(copies, [
+            'cp -R .claude-plugin skills agents hooks bin ticket_pilot "$plugin/"',
+            'cp LICENSE README.md config.example.json "$plugin/"',
+        ])
+        for line in copies:
+            self.assertLess(self.text.index(line), self.text.index("codesign --force"))
+
+    def test_embedded_plugin_lists_exactly_what_the_plugin_needs(self):
+        copied = set()
+        for line in self.plugin_copy_lines():
+            copied.update(w for w in line.split() if w not in ("cp", "-R", '"$plugin/"'))
+        self.assertEqual(copied, {
+            ".claude-plugin", "skills", "agents", "hooks", "bin", "ticket_pilot",
+            "LICENSE", "README.md", "config.example.json",
+        })
+        for excluded in ("app", "tests", ".git", ".superpowers", ".github"):
+            self.assertNotIn(excluded, copied)
+        for name in copied:
+            self.assertTrue((ROOT / name).exists(), name)
+
+    def test_embedded_plugin_drops_python_caches(self):
+        cleanup = next(l for l in self.text.splitlines() if l.startswith('find "$plugin"'))
+        self.assertIn("-name __pycache__", cleanup)
+        self.assertIn("-exec rm -rf {} +", cleanup)
+        self.assertLess(self.text.index(cleanup), self.text.index("codesign --force"))
+
     def test_script_works_from_any_directory_and_avoids_sudo(self):
         self.assertIn('cd "$(dirname "${BASH_SOURCE[0]}")"', self.text)
         code = [l for l in self.text.splitlines() if not l.lstrip().startswith("#")]

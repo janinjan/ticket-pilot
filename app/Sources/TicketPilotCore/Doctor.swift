@@ -26,6 +26,8 @@ public struct HealthCheck: Equatable, Identifiable, Sendable {
     /// True when only a new Jira token can fix this check (missing, or refused by Jira); false
     /// when the Keychain itself refused access.
     public var needsToken: Bool
+    /// For the plugin check: the installed plugin compared with the copy the app carries.
+    public var pluginState: PluginState?
 
     public init(
         id: Kind,
@@ -34,7 +36,8 @@ public struct HealthCheck: Equatable, Identifiable, Sendable {
         fix: String? = nil,
         blocksStart: Bool = false,
         blockedRepos: [String] = [],
-        needsToken: Bool = false
+        needsToken: Bool = false,
+        pluginState: PluginState? = nil
     ) {
         self.id = id
         self.ok = ok
@@ -43,10 +46,16 @@ public struct HealthCheck: Equatable, Identifiable, Sendable {
         self.blocksStart = blocksStart
         self.blockedRepos = blockedRepos
         self.needsToken = needsToken
+        self.pluginState = pluginState
     }
 }
 
 extension Array where Element == HealthCheck {
+    /// The `claude` executable the doctor found, if any.
+    public var claudePath: String? {
+        first { $0.id == .claudeCLI && $0.ok }?.detail
+    }
+
     /// A repo can start a run when no check blocks every start and none blocks that repo.
     public func canStart(repo: String) -> Bool {
         startBlocker(repo: repo) == nil
@@ -80,6 +89,7 @@ public struct Doctor: Sendable {
     private let tokenLookup: @Sendable () throws -> String
     private let freeBytes: @Sendable () -> Int64?
     private let claudeSearchPaths: [String]
+    private let bundledPluginManifest: URL?
 
     /// An app started from the Finder has no shell `PATH`, so `claude` is looked up at its usual locations.
     public static func defaultClaudeSearchPaths(home: URL) -> [String] {
@@ -97,7 +107,8 @@ public struct Doctor: Sendable {
         jira: JiraSearching?,
         tokenLookup: @escaping @Sendable () throws -> String,
         freeBytes: @escaping @Sendable () -> Int64?,
-        claudeSearchPaths: [String]? = nil
+        claudeSearchPaths: [String]? = nil,
+        bundledPluginManifest: URL? = nil
     ) {
         self.config = config
         self.home = home
@@ -106,6 +117,12 @@ public struct Doctor: Sendable {
         self.tokenLookup = tokenLookup
         self.freeBytes = freeBytes
         self.claudeSearchPaths = claudeSearchPaths ?? Self.defaultClaudeSearchPaths(home: home)
+        self.bundledPluginManifest = bundledPluginManifest
+    }
+
+    /// The manifest of the plugin copy inside the app bundle (`Resources/plugin`).
+    public static func bundledPluginManifest(resources: URL?) -> URL? {
+        resources?.appendingPathComponent("plugin/.claude-plugin/plugin.json")
     }
 
     public func run() async -> [HealthCheck] {
@@ -143,16 +160,34 @@ public struct Doctor: Sendable {
     }
 
     private func checkPlugin() -> HealthCheck {
-        if let version = installedPluginVersion() {
-            return HealthCheck(id: .plugin, ok: true, detail: version)
+        let installed = installedPluginVersion()
+        let bundled = bundledPluginVersion()
+        let state = PluginState.compare(installed: installed, bundled: bundled)
+        let detail = "\(installed.map { "installed \($0)" } ?? "not installed") · bundled \(bundled ?? "none")"
+        switch state {
+        case .missing:
+            return HealthCheck(
+                id: .plugin,
+                ok: false,
+                detail: detail,
+                fix: "claude plugin install \(Self.pluginKey)",
+                blocksStart: true,
+                pluginState: state
+            )
+        case .outdated:
+            // The installed plugin still runs: an update never blocks a start.
+            return HealthCheck(id: .plugin, ok: false, detail: detail, pluginState: state)
+        case .current, .newerThanBundled, .unknown:
+            return HealthCheck(id: .plugin, ok: true, detail: detail, pluginState: state)
         }
-        return HealthCheck(
-            id: .plugin,
-            ok: false,
-            detail: "The ticket-pilot plugin is not installed",
-            fix: "claude plugin install \(Self.pluginKey)",
-            blocksStart: true
-        )
+    }
+
+    private func bundledPluginVersion() -> String? {
+        guard let bundledPluginManifest,
+              let data = try? Data(contentsOf: bundledPluginManifest),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return root["version"] as? String
     }
 
     private func installedPluginVersion() -> String? {

@@ -29,9 +29,13 @@ private struct TokenError: Error {}
         var home: URL
         var claude: String
         var repoPaths: [String: String]
+        var bundledManifest: URL
     }
 
-    func makeFixture(claude: Bool = true, plugin: Bool = true, existingRepos: Bool = true) throws -> Fixture {
+    func makeFixture(
+        claude: Bool = true, plugin: Bool = true, installedVersion: String = "0.4.2", bundledVersion: String? = "0.4.2",
+        existingRepos: Bool = true
+    ) throws -> Fixture {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent("tp-doctor-\(UUID().uuidString)")
         let bin = home.appendingPathComponent(".local/bin")
         try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
@@ -43,7 +47,7 @@ private struct TokenError: Error {}
         if plugin {
             let dir = home.appendingPathComponent(".claude/plugins")
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            let json = #"{"version":2,"plugins":{"ticket-pilot@ticket-pilot":[{"scope":"user","version":"0.4.2"}]}}"#
+            let json = #"{"version":2,"plugins":{"ticket-pilot@ticket-pilot":[{"scope":"user","version":"\#(installedVersion)"}]}}"#
             try json.write(to: dir.appendingPathComponent("installed_plugins.json"), atomically: true, encoding: .utf8)
         }
         var paths: [String: String] = [:]
@@ -54,7 +58,12 @@ private struct TokenError: Error {}
             }
             paths[name] = url.path
         }
-        return Fixture(home: home, claude: claudePath, repoPaths: paths)
+        let manifest = home.appendingPathComponent("bundle/plugin/.claude-plugin/plugin.json")
+        if let bundledVersion {
+            try FileManager.default.createDirectory(at: manifest.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try #"{"name":"ticket-pilot","version":"\#(bundledVersion)"}"#.write(to: manifest, atomically: true, encoding: .utf8)
+        }
+        return Fixture(home: home, claude: claudePath, repoPaths: paths, bundledManifest: manifest)
     }
 
     func makeConfig(_ fixture: Fixture) throws -> AppConfig {
@@ -82,7 +91,8 @@ private struct TokenError: Error {}
             jira: jira,
             tokenLookup: token,
             freeBytes: { freeBytes },
-            claudeSearchPaths: [fixture.claude]
+            claudeSearchPaths: [fixture.claude],
+            bundledPluginManifest: fixture.bundledManifest
         )
     }
 
@@ -100,7 +110,8 @@ private struct TokenError: Error {}
         #expect(checks.allSatisfy { $0.ok })
         #expect(checks.canStart(repo: "ios"))
         let plugin = try check(checks, .plugin)
-        #expect(plugin.detail == "0.4.2")
+        #expect(plugin.detail == "installed 0.4.2 · bundled 0.4.2")
+        #expect(plugin.pluginState == .current)
     }
 
     @Test func missingClaudeBlocksEveryStart() async throws {
@@ -127,7 +138,47 @@ private struct TokenError: Error {}
         #expect(!plugin.ok)
         #expect(plugin.blocksStart)
         #expect(plugin.fix == "claude plugin install ticket-pilot@ticket-pilot")
+        #expect(plugin.pluginState == .missing)
+        #expect(plugin.detail == "not installed · bundled 0.4.2")
         #expect(!checks.canStart(repo: "web"))
+    }
+
+    @Test func olderPluginIsOutdatedButDoesNotBlock() async throws {
+        let fixture = try makeFixture(installedVersion: "0.1.2", bundledVersion: "0.1.10")
+        defer { try? FileManager.default.removeItem(at: fixture.home) }
+        let checks = await (try makeDoctor(fixture)).run()
+        let plugin = try check(checks, .plugin)
+        #expect(!plugin.ok)
+        #expect(!plugin.blocksStart)
+        #expect(plugin.pluginState == .outdated(installed: "0.1.2", bundled: "0.1.10"))
+        #expect(plugin.detail == "installed 0.1.2 · bundled 0.1.10")
+        #expect(checks.canStart(repo: "web"))
+    }
+
+    @Test func newerPluginThanBundledIsFine() async throws {
+        let fixture = try makeFixture(installedVersion: "0.2.0", bundledVersion: "0.1.3")
+        defer { try? FileManager.default.removeItem(at: fixture.home) }
+        let plugin = try check(await (try makeDoctor(fixture)).run(), .plugin)
+        #expect(plugin.ok)
+        #expect(plugin.pluginState == .newerThanBundled)
+    }
+
+    @Test func noBundledCopyStillAcceptsAnInstalledPlugin() async throws {
+        let fixture = try makeFixture(bundledVersion: nil)
+        defer { try? FileManager.default.removeItem(at: fixture.home) }
+        let plugin = try check(await (try makeDoctor(fixture)).run(), .plugin)
+        #expect(plugin.ok)
+        #expect(plugin.pluginState == .unknown)
+        #expect(plugin.detail == "installed 0.4.2 · bundled none")
+    }
+
+    @Test func claudePathComesFromTheClaudeCheck() async throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.home) }
+        #expect(await (try makeDoctor(fixture)).run().claudePath == fixture.claude)
+        let missing = try makeFixture(claude: false)
+        defer { try? FileManager.default.removeItem(at: missing.home) }
+        #expect(await (try makeDoctor(missing)).run().claudePath == nil)
     }
 
     @Test func missingTokenBlocksWithKeychainFix() async throws {
