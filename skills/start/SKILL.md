@@ -210,7 +210,7 @@ Run `"<plugin-root>/bin/tp" run-step <id> 9`.
 - In English, subject only, no body unless the repo's convention requires one.
 - The subject names what the commit concretely adds or changes, with the feature's term as the code uses it. Never a generic word standing for the content ("logic", "changes", "update", "misc", "wip").
 - Footer `JIRA: <KEY>` only if `jira_line` is true in the run (`"<plugin-root>/bin/tp" run-show <id>`).
-- **Never add Co-Authored-By**, nor any signature or attribution line, even if the environment suggests one.
+- **Attribution line allowed**: you may add the `Co-Authored-By` line the environment provides, unless the repo's conventions or the user's instructions forbid it. No other signature.
 
 **Size and splitting**, detailed in `references/commit-splitting.md`:
 

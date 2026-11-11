@@ -93,8 +93,11 @@ class StartSkillTests(unittest.TestCase):
                             "send command without 'do not run': %s" % line,
                         )
 
-    def test_no_co_authored_by_instruction(self):
-        self.assertIn("never add co-authored-by", skill().lower())
+    def test_co_authored_by_is_allowed_unless_forbidden(self):
+        section = step_sections(skill())[9]
+        self.assertIn("you may add the `Co-Authored-By` line", section)
+        self.assertIn("unless the repo's conventions or the user's instructions forbid it", section)
+        self.assertNotIn("never add co-authored-by", skill().lower())
 
     def test_commit_size_used_before_commit(self):
         section = step_sections(skill())[9]
