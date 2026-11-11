@@ -327,6 +327,13 @@ class StartSkillTests(unittest.TestCase):
         self.assertIn("ask before cloning it", step_nine)
         self.assertIn("also runs locally", step_nine)
 
+    def test_skill_reads_the_repo_memory_itself(self):
+        text = skill()
+        head = text[:text.index("## Start-up")]
+        self.assertIn("The user's memory for this repo", head)
+        self.assertIn("every non-alphanumeric character replaced by `-`", head)
+        self.assertIn("a rule of the memory wins over a default of this skill", head)
+
     def test_commit_subject_is_never_generic(self):
         section = step_sections(skill())[9]
         self.assertIn("Never a generic word", section)
