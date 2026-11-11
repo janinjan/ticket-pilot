@@ -21,7 +21,7 @@ REVIEW_KINDS = ("gerrit", "github")
 JIRA_AUTH_KINDS = ("mcp", "api_token")
 
 REPO_STRING_KEYS = (
-    "setup_command", "ci_review_prompt", "ci_review_command", "launch_skill", "sync_command",
+    "setup_command", "ci_review_prompt", "ci_review_command", "launch_skill", "sync_command", "editor",
 )
 TOP_STRING_KEYS = (
     "sync_command",
@@ -29,6 +29,7 @@ TOP_STRING_KEYS = (
     "auditor_agent",
     "terminal_app",
     "permission_mode",
+    "git_client",
 )
 
 

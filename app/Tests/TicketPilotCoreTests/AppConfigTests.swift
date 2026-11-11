@@ -21,6 +21,9 @@ struct AppConfigTests {
         #expect(config.pollMinutes == 5)
         #expect(config.readyStatuses == ["To Start"])
         #expect(config.terminalApp == "Terminal")
+        #expect(config.gitClient == "GitHub Desktop")
+        #expect(config.repos[0].editor == "Xcode")
+        #expect(config.repos[1].editor == nil)
         #expect(config.jira.keychainService == "ticket-pilot-jira")
     }
 
@@ -34,6 +37,7 @@ struct AppConfigTests {
         #expect(config.pollMinutes == 5)
         #expect(config.readyStatuses == ["To Start"])
         #expect(config.terminalApp == nil)
+        #expect(config.gitClient == nil)
         #expect(config.permissionMode == nil)
         #expect(config.stuckMinutes == [:])
         #expect(config.repos[0].match.labels == [])

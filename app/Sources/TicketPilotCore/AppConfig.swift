@@ -63,9 +63,11 @@ public struct RepoConfig: Decodable, Sendable, Hashable {
     public var mainBranch: String
     public var review: String
     public var match: MatchRules
+    /// The app the menu bar app opens a run's worktree in; else chosen by the project type.
+    public var editor: String?
 
     private enum CodingKeys: String, CodingKey {
-        case name, path, review, match
+        case name, path, review, match, editor
         case mainBranch = "main_branch"
     }
 
@@ -76,6 +78,7 @@ public struct RepoConfig: Decodable, Sendable, Hashable {
         mainBranch = try container.decode(String.self, forKey: .mainBranch)
         review = try container.decode(String.self, forKey: .review)
         match = try container.decodeIfPresent(MatchRules.self, forKey: .match) ?? MatchRules()
+        editor = try container.decodeIfPresent(String.self, forKey: .editor)
     }
 }
 
@@ -85,6 +88,8 @@ public struct AppConfig: Decodable, Sendable {
     public var pollMinutes: Int
     public var readyStatuses: [String]
     public var terminalApp: String?
+    /// The git client a finished run is reviewed in; else the first known one installed.
+    public var gitClient: String?
     public var permissionMode: String?
     public var stuckMinutes: [String: Int]
 
@@ -93,6 +98,7 @@ public struct AppConfig: Decodable, Sendable {
         case pollMinutes = "poll_minutes"
         case readyStatuses = "ready_statuses"
         case terminalApp = "terminal_app"
+        case gitClient = "git_client"
         case permissionMode = "permission_mode"
         case stuckMinutes = "stuck_minutes"
     }
@@ -104,6 +110,7 @@ public struct AppConfig: Decodable, Sendable {
         pollMinutes = try container.decodeIfPresent(Int.self, forKey: .pollMinutes) ?? 5
         readyStatuses = try container.decodeIfPresent([String].self, forKey: .readyStatuses) ?? ["To Start"]
         terminalApp = try container.decodeIfPresent(String.self, forKey: .terminalApp)
+        gitClient = try container.decodeIfPresent(String.self, forKey: .gitClient)
         permissionMode = try container.decodeIfPresent(String.self, forKey: .permissionMode)
         stuckMinutes = try container.decodeIfPresent([String: Int].self, forKey: .stuckMinutes) ?? [:]
     }

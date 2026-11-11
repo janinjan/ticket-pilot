@@ -158,9 +158,11 @@ class MalformedShapeTests(unittest.TestCase):
 
 
 class OptionalKeyTests(unittest.TestCase):
-    STRING_KEYS = ("sync_command", "reviewer_agent", "auditor_agent", "terminal_app", "permission_mode")
+    STRING_KEYS = (
+        "sync_command", "reviewer_agent", "auditor_agent", "terminal_app", "permission_mode", "git_client",
+    )
     REPO_STRING_KEYS = (
-        "setup_command", "ci_review_prompt", "ci_review_command", "launch_skill", "sync_command",
+        "setup_command", "ci_review_prompt", "ci_review_command", "launch_skill", "sync_command", "editor",
     )
 
     def problems_for(self, data):
@@ -217,7 +219,7 @@ class OptionalKeyTests(unittest.TestCase):
 
     def test_example_config_documents_optional_keys(self):
         data = json.loads((ROOT / "config.example.json").read_text())
-        for key in ("sync_command", "reviewer_agent", "auditor_agent", "terminal_app", "permission_mode"):
+        for key in self.STRING_KEYS:
             self.assertIn(key, data)
         repo_keys = set()
         for repo in data["repos"]:

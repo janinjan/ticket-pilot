@@ -19,7 +19,8 @@
       "setup_command": "make bootstrap",
       "ci_review_prompt": "docs/ci-review-prompt.md",
       "ci_review_command": "scripts/ci-review-local.sh \"$TP_REV\"",
-      "launch_skill": "run-ios-app"
+      "launch_skill": "run-ios-app",
+      "editor": "Xcode"
     },
     {
       "name": "android",
@@ -54,6 +55,7 @@
   "reviewer_agent": "ticket-pilot:reviewer",
   "auditor_agent": "ticket-pilot:auditor",
   "terminal_app": "Terminal",
+  "git_client": "GitHub Desktop",
   "max_commit_lines": 999,
   "generated_globs": [],
   "snapshot_globs": ["**/__Snapshots__/**"],

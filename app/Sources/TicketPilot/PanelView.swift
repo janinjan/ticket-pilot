@@ -192,6 +192,7 @@ struct PanelView: View {
                     }
                     .accessibilityElement(children: .combine)
                     sessionButton(line)
+                    runMenu(line)
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(line.context)
@@ -217,15 +218,23 @@ struct PanelView: View {
         .accessibilityLabel(line.isStuck ? "\(line.name), maybe stuck" : line.name)
     }
 
-    /// "Show in Finder" and "Release…", under the card's text; nothing when neither applies.
+    /// "Review in <git client>" for a finished run, and "Release…", under the card's text; nothing when
+    /// neither applies.
     @ViewBuilder
     private func secondaryRunButtons(_ line: RunLine) -> some View {
-        let finderTitle = line.section == .reportReady ? model.showInFinderTitle(runID: line.runID) : nil
+        let gitClient = line.section == .reportReady && model.hasWorktree(runID: line.runID) ? model.gitClient : nil
         let releasable = model.releasable.contains(line.runID)
-        if finderTitle != nil || releasable {
+        if gitClient != nil || releasable {
             HStack(spacing: 6) {
-                if let finderTitle {
-                    finderButton(line, title: finderTitle)
+                if let gitClient {
+                    Button(action: closing { model.reviewInGitClient(runID: line.runID) }) {
+                        Text("Review in \(gitClient)")
+                            .lineLimit(1)
+                            .fixedSize()
+                    }
+                    .buttonStyle(.brandSecondary)
+                    .help("Opens the worktree in \(gitClient), to review its commits")
+                    .accessibilityLabel("Review \(line.name) in \(gitClient)")
                 }
                 if releasable {
                     Button(action: closing { model.release(runID: line.runID) }) {
@@ -241,21 +250,31 @@ struct PanelView: View {
         }
     }
 
-    private func finderButton(_ line: RunLine, title finderTitle: String) -> some View {
-        Button(action: closing { model.revealWorktree(runID: line.runID) }) {
-            HStack(spacing: 4) {
-                Text("Show in Finder")
-                if let size = model.worktreeSize(runID: line.runID) {
-                    Text(size)
-                        .foregroundStyle(.tertiary)
+    /// The card's "⋯": open the worktree in its editor, or show it in the Finder with its size.
+    @ViewBuilder
+    private func runMenu(_ line: RunLine) -> some View {
+        let editor = model.editors[line.runID]
+        let finderTitle = model.showInFinderTitle(runID: line.runID)
+        if editor != nil || finderTitle != nil {
+            Menu {
+                if let editor {
+                    Button("Open in \(editor.app)", action: closing { model.openInEditor(runID: line.runID) })
+                        .accessibilityLabel("Open \(line.name) in \(editor.app)")
                 }
+                if let finderTitle {
+                    Button(finderTitle, action: closing { model.revealWorktree(runID: line.runID) })
+                        .accessibilityLabel("\(finderTitle), \(line.name)")
+                }
+            } label: {
+                Image(systemName: "ellipsis")
             }
-            .lineLimit(1)
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
             .fixedSize()
+            .frame(minWidth: 24, minHeight: 24)
+            .contentShape(Rectangle())
+            .accessibilityLabel("More for \(line.name)")
         }
-        .buttonStyle(.brandSecondary)
-        .help("Reveal the worktree in the Finder")
-        .accessibilityLabel("\(finderTitle), \(line.name)")
     }
 
     private func sessionButton(_ line: RunLine) -> some View {

@@ -20,6 +20,14 @@ final class AppModel {
     private(set) var diskUsage: [String: Int64] = [:]
     /// Commits of each finished run, ready for review, by run id.
     private(set) var commitCounts: [String: Int] = [:]
+    /// The git client finished runs are reviewed in (`git_client`, else the first known one installed).
+    private(set) var gitClient: String?
+    /// The editor each run's worktree opens in, by run id; none when no installed app fits.
+    private(set) var editors: [String: EditorTarget] = [:]
+    /// The known editors installed, looked for with the git clients at each config load.
+    @ObservationIgnored private var installedEditors: [String] = []
+    /// The exact copy of each known editor and git client installed: the newest one.
+    @ObservationIgnored private var appPaths: [String: String] = [:]
     /// The check whose fix command was just copied: it reads "Copied ✓" for a few seconds.
     private(set) var copiedFix: HealthCheck.Kind?
     /// The terminal sessions open in, resolved at launch and on "Check again".
@@ -311,6 +319,13 @@ final class AppModel {
             configuredTerminal = config?.terminalApp
             resolveTerminal(configured: config?.terminalApp)
             // Runs are read before the config at launch: what depends on it is derived again.
+            // The newest copy of each known app, found once (Xcode_27.1 over Xcode_27, a Preview over a release).
+            appPaths = ApplicationFinder().paths(among: ToolChoice.knownEditors + ToolChoice.gitClients)
+            gitClient = ToolChoice.gitClient(
+                configured: config?.gitClient, installed: ToolChoice.gitClients.filter { appPaths[$0] != nil }
+            )
+            installedEditors = ToolChoice.knownEditors.filter { appPaths[$0] != nil }
+            updateEditors()
             countCommits()
             updatePresentation()
         } catch {
@@ -370,6 +385,7 @@ final class AppModel {
         updatePresentation()
         measureDiskUsage()
         countCommits()
+        updateEditors()
     }
 
     /// Also run every minute, so a run interrupted without a status update stops keeping the Mac awake.
@@ -384,13 +400,53 @@ final class AppModel {
     }
 
     /// "Show in Finder · <size>" for a run with a worktree.
-    /// The worktree's size, once measured.
-    func worktreeSize(runID: String) -> String? {
-        RunLine.sizeLabel(bytes: diskUsage[runID])
-    }
 
     func showInFinderTitle(runID: String) -> String? {
         runs.first { $0.id == runID }.flatMap { RunLine.showInFinderTitle($0, bytes: diskUsage[runID]) }
+    }
+
+    func hasWorktree(runID: String) -> Bool {
+        runs.first { $0.id == runID }?.worktree != nil
+    }
+
+    /// Picks the editor of each run with a worktree, from its root folder's entries.
+    private func updateEditors() {
+        var editors: [String: EditorTarget] = [:]
+        for run in runs {
+            guard let worktree = run.worktree,
+                  let entries = try? FileManager.default.contentsOfDirectory(atPath: worktree)
+            else { continue }
+            let configured = config?.repos.first { $0.name == run.repo }?.editor
+            editors[run.id] = ToolChoice.editor(
+                configured: configured, worktree: worktree, entries: entries, installed: installedEditors,
+                appPaths: appPaths
+            )
+        }
+        self.editors = editors
+    }
+
+    /// Opens the finished run's worktree in the git client, to review its commits.
+    func reviewInGitClient(runID: String) {
+        guard let app = gitClient, let worktree = runs.first(where: { $0.id == runID })?.worktree else { return }
+        openTool(EditorTarget(app: app, path: worktree, appPath: appPaths[app]))
+    }
+
+    /// Opens the run's worktree (or its Xcode project) in its editor.
+    func openInEditor(runID: String) {
+        guard let target = editors[runID] else { return }
+        openTool(target)
+    }
+
+    /// `open -a` blocks until the app answers: off the main actor, a failure in an alert.
+    private func openTool(_ target: EditorTarget) {
+        let launcher = ToolLauncher(runner: runner)
+        Task.detached {
+            do {
+                try launcher.open(target)
+            } catch {
+                await Alerts.show(AlertText(title: "\(target.app) did not open", message: "\(error)"))
+            }
+        }
     }
 
     /// Reveals the run's worktree in the Finder.
