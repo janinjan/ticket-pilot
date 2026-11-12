@@ -14,12 +14,6 @@ public struct SetupProblem: Equatable, Sendable {
         case explain(AlertText)
         /// Runs the setup check again.
         case checkAgain
-        /// Runs the setup check again after the Keychain refused access: if it still does, the next
-        /// problem is `resetJiraSignIn`.
-        case recheckKeychain
-        /// Deletes the app's Jira sign-in from the Keychain (the API token, or the Atlassian sign-in), then
-        /// connects Jira again.
-        case resetJiraSignIn(JiraAuth)
         /// Installs or updates the Claude Code plugin the app carries.
         case installPlugin(PluginState)
     }
@@ -43,15 +37,14 @@ public struct SetupProblem: Equatable, Sendable {
 
     static let claudeCodeURL = URL(string: "https://docs.claude.com/claude-code")!
 
-    /// In order: a config error, Claude Code missing, the plugin missing, the Jira token to enter (or the
-    /// Atlassian sign-in to make, or Atlassian's refusal to explain), the Keychain refusing access, Jira unreachable (or failing to answer the poll), a repo path missing, an
+    /// In order: a config error, Claude Code missing, the plugin missing, Jira to connect (the token to
+    /// enter or the Atlassian sign-in to make, also when the Keychain refuses to read the stored one; or
+    /// Atlassian's refusal to explain), Jira unreachable (or failing to answer the poll), a repo path missing, an
     /// older plugin than the one the app carries (it still runs, so the update comes last).
     /// `jiraFailing` only counts once the checks are in, so a missing token is not shown as unreachable first.
     /// The other failed checks (MCP servers, disk space) are only warnings: they stay in Diagnostics.
-    /// A Keychain refusal is checked again first (the item may be gone or allowed by now); once
-    /// `keychainRechecked` and still refused, the fix is to reset the Jira sign-in.
     public static func first(
-        in checks: [HealthCheck], configError: String? = nil, jiraFailing: Bool = false, keychainRechecked: Bool = false
+        in checks: [HealthCheck], configError: String? = nil, jiraFailing: Bool = false
     ) -> SetupProblem? {
         if let configError {
             return SetupProblem(
@@ -76,25 +69,19 @@ public struct SetupProblem: Equatable, Sendable {
                 action: .installPlugin(.missing)
             )
         }
-        if let token = failed(.jiraToken) {
-            if token.needsToken {
-                return SetupProblem(title: "Connect Jira…", explanation: "Connect Jira to see your tickets here.", action: .setJiraToken)
-            }
-            return keychainRefused(reading: "your Jira token", auth: .apiToken, rechecked: keychainRechecked)
+        if failed(.jiraToken) != nil {
+            return SetupProblem(title: "Connect Jira…", explanation: "Connect Jira to see your tickets here.", action: .setJiraToken)
         }
         if let signIn = failed(.jiraSignIn) {
-            if signIn.needsToken {
-                return SetupProblem(title: "Connect Jira…", explanation: "Connect Jira to see your tickets here.", action: .connectAtlassian)
-            }
-            let message = [signIn.detail, signIn.fix].compactMap { $0 }.joined(separator: "\n\n")
             if signIn.refusedByServer {
+                let message = [signIn.detail, signIn.fix].compactMap { $0 }.joined(separator: "\n\n")
                 return SetupProblem(
                     title: "See why Jira refused…",
                     explanation: "Atlassian refused the connection to Jira.",
                     action: .explain(AlertText(title: "Atlassian refused the connection", message: message))
                 )
             }
-            return keychainRefused(reading: "your Atlassian sign-in", auth: .mcp, rechecked: keychainRechecked)
+            return SetupProblem(title: "Connect Jira…", explanation: "Connect Jira to see your tickets here.", action: .connectAtlassian)
         }
         if failed(.jiraReachable) != nil || (jiraFailing && !checks.isEmpty) {
             return SetupProblem(
@@ -123,20 +110,5 @@ public struct SetupProblem: Equatable, Sendable {
             )
         }
         return nil
-    }
-
-    private static func keychainRefused(reading item: String, auth: JiraAuth, rechecked: Bool) -> SetupProblem {
-        guard rechecked else {
-            return SetupProblem(
-                title: "Check again",
-                explanation: "TicketPilot couldn't read \(item) from the Keychain. It may work now.",
-                action: .recheckKeychain
-            )
-        }
-        return SetupProblem(
-            title: "Reset Jira sign-in…",
-            explanation: "The Keychain still refuses access. Reset the Jira sign-in, then connect Jira again.",
-            action: .resetJiraSignIn(auth)
-        )
     }
 }

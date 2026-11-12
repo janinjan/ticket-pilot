@@ -336,7 +336,7 @@ struct PanelView: View {
     private func setupButton(_ title: String) -> some View {
         // Copying a fix or checking again keeps the panel open, to show "Copied ✓" or the new state.
         let staysOpen = switch model.setupProblem?.action {
-        case .copyFix, .checkAgain, .recheckKeychain: true
+        case .copyFix, .checkAgain: true
         default: false
         }
         return Button(title, action: staysOpen ? model.fixSetupProblem : closing(model.fixSetupProblem))

@@ -53,21 +53,9 @@ import Testing
         #expect(problem == SetupProblem(title: "Connect Jira…", explanation: "Connect Jira to see your tickets here.", action: .setJiraToken))
     }
 
-    @Test func test_refusedKeychainChecksAgainFirstThenOffersAReset() {
-        // The item may be gone, or allowed, by now: a new check comes first.
-        let first = SetupProblem.first(in: [Self.unreachable, Self.keychain])
-        #expect(first == SetupProblem(
-            title: "Check again",
-            explanation: "TicketPilot couldn't read your Jira token from the Keychain. It may work now.",
-            action: .recheckKeychain
-        ))
-        // Still refused after that check: start the sign-in afresh.
-        let again = SetupProblem.first(in: [Self.unreachable, Self.keychain], keychainRechecked: true)
-        #expect(again == SetupProblem(
-            title: "Reset Jira sign-in…",
-            explanation: "The Keychain still refuses access. Reset the Jira sign-in, then connect Jira again.",
-            action: .resetJiraSignIn(.apiToken)
-        ))
+    @Test func test_refusedKeychainConnectsJira() {
+        let problem = SetupProblem.first(in: [Self.unreachable, Self.keychain])
+        #expect(problem == SetupProblem(title: "Connect Jira…", explanation: "Connect Jira to see your tickets here.", action: .setJiraToken))
     }
 
     @Test func test_unreachableJiraChecksAgain() {
@@ -144,13 +132,12 @@ import Testing
         ))
     }
 
-    @Test func test_keychainRefusedForTheSignInChecksAgainThenOffersAReset() {
+    @Test func test_keychainRefusedForTheSignInConnectsJira() {
         let keychain = HealthCheck(id: .jiraSignIn, ok: false, detail: "Keychain refused", fix: "Allow TicketPilot", blocksStart: true)
         #expect(SetupProblem.first(in: [keychain]) == SetupProblem(
-            title: "Check again",
-            explanation: "TicketPilot couldn't read your Atlassian sign-in from the Keychain. It may work now.",
-            action: .recheckKeychain
+            title: "Connect Jira…",
+            explanation: "Connect Jira to see your tickets here.",
+            action: .connectAtlassian
         ))
-        #expect(SetupProblem.first(in: [keychain], keychainRechecked: true)?.action == .resetJiraSignIn(.mcp))
     }
 }
