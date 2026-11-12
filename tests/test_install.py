@@ -35,7 +35,7 @@ class InstallScriptTests(unittest.TestCase):
         self.assertIn(".TicketPilot.app.new", self.text)
         for expected in (
             "swift build -c release --package-path app --arch arm64 --arch x86_64",
-            "codesign --force --sign -",
+            'codesign --force --sign "${TICKET_PILOT_SIGN_IDENTITY:--}"',
             'destination="/Applications/TicketPilot.app"',
             'bundle="/Applications/.TicketPilot.app.new"',
             'rm -rf "$HOME/Applications/TicketPilot.app"',

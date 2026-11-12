@@ -54,7 +54,9 @@ mkdir -p "$plugin"
 cp -R .claude-plugin skills agents hooks bin ticket_pilot "$plugin/"
 cp LICENSE README.md config.example.json "$plugin/"
 find "$plugin" \( -name __pycache__ -o -name '*.pyc' -o -name .DS_Store \) -prune -exec rm -rf {} +
-codesign --force --sign - "$bundle"
+# A signing identity keeps the app the same for the Keychain from one build to the next, so its
+# "Always Allow" lasts; without one, the app is signed ad hoc and macOS asks again after each install.
+codesign --force --sign "${TICKET_PILOT_SIGN_IDENTITY:--}" "$bundle"
 
 if pgrep -x TicketPilot >/dev/null 2>&1; then
   osascript -e 'quit app "TicketPilot"' >/dev/null 2>&1 || true
