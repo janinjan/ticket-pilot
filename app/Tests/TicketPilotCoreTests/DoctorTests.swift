@@ -66,9 +66,10 @@ private struct TokenError: Error {}
         return Fixture(home: home, claude: claudePath, repoPaths: paths, bundledManifest: manifest)
     }
 
-    func makeConfig(_ fixture: Fixture, auth: String = "api_token") throws -> AppConfig {
+    func makeConfig(_ fixture: Fixture, auth: String = "api_token", webGuidelines: String = "") throws -> AppConfig {
         let repos = ["ios", "web"].map {
-            #"{"name":"\#($0)","path":"\#(fixture.repoPaths[$0]!)","main_branch":"main","review":"none"}"#
+            let guidelines = $0 == "web" && !webGuidelines.isEmpty ? #","guidelines":["\#(webGuidelines)"]"# : ""
+            return #"{"name":"\#($0)","path":"\#(fixture.repoPaths[$0]!)","main_branch":"main","review":"none"\#(guidelines)}"#
         }
         let json = """
         {"jira":{"site":"https://example.atlassian.net","email":"me@example.com","keychain_service":"tp-test",\
@@ -84,10 +85,11 @@ private struct TokenError: Error {}
         jira: JiraSearching? = FakeJira(),
         token: @escaping @Sendable () throws -> String = { "secret" },
         freeBytes: Int64? = 100_000_000_000,
-        auth: String = "api_token"
+        auth: String = "api_token",
+        webGuidelines: String = ""
     ) throws -> Doctor {
         Doctor(
-            config: try makeConfig(fixture, auth: auth),
+            config: try makeConfig(fixture, auth: auth, webGuidelines: webGuidelines),
             home: fixture.home,
             runner: runner,
             jira: jira,
@@ -155,6 +157,17 @@ private struct TokenError: Error {}
         #expect(plugin.pluginState == .outdated(installed: "0.1.2", bundled: "0.1.10"))
         #expect(plugin.detail == "installed 0.1.2 · bundled 0.1.10")
         #expect(checks.canStart(repo: "web"))
+    }
+
+    @Test func reposCheckListsEachRepo() async throws {
+        let fixture = try makeFixture(existingRepos: false)
+        defer { try? FileManager.default.removeItem(at: fixture.home) }
+        let checks = await (try makeDoctor(fixture, webGuidelines: "~/guidelines/docs")).run()
+        let repos = try check(checks, .repoPaths)
+        #expect(repos.lines == [
+            "iOS · \(fixture.repoPaths["ios"]!) · main (not found)",
+            "Web · \(fixture.repoPaths["web"]!) · main · guidelines: ~/guidelines/docs",
+        ])
     }
 
     @Test func newerPluginThanBundledIsFine() async throws {

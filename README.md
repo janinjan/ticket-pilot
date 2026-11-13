@@ -237,11 +237,12 @@ A card is titled with the ticket's title: the one the plugin recorded (`tp run-s
 
 **Settings…** opens a small window with:
 
+- the config file (`~/.config/ticket-pilot/config.json`, or `TICKET_PILOT_CONFIG`), with Open (in your default text editor) and Show in Finder;
 - Open at login;
 - "Play a sound when TicketPilot needs you" (on by default: a go, a question, "launch the app" or a ready report plays the default notification sound; a plain end of turn and a new ticket never do);
 - "Send a test notification" (with the sound when it is on; when macOS does not allow TicketPilot's notifications, it explains how to allow them and opens System Settings › Notifications), with the current state under it ("Notifications: allowed", "sound off" or "not allowed");
 - the terminal sessions open in ("Automatic (<the one detected>)" or one of the known terminals installed, or Terminal; the choice is saved as `terminal_app` in your config, every other key kept, and "Automatic" removes the key);
-- Diagnostics (every setup check with ✓ or ✗, its detail, its fix command to copy, and "Set Jira token…" when needed; the plugin line reads "installed <version> · bundled <version>") and Check again.
+- Diagnostics (every setup check with ✓ or ✗, its detail, its fix command to copy, and "Set Jira token…" when needed; the plugin line reads "installed <version> · bundled <version>"; the Repos line lists each repo as "<name> · <path> · <main branch>", with its guidelines when it has some and "(not found)" after a missing path) and Check again, which runs every check again, reloads the config and reads Jira at once ("Checking…" while it runs, then "Checked at <time>").
 
 **About TicketPilot** shows the app icon, its name, the version, the copyright and the license, with no links (the issues are behind Send feedback). Settings and About close with ⌘W.
 

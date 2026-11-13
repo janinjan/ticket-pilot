@@ -58,6 +58,10 @@ final class AppModel {
     private(set) var jiraAccount: String?
     /// From "Connect Jira" until the browser came back, or the sign-in was cancelled.
     private(set) var signingIn = false
+    /// From "Check again" (or any setup check) until its results are in.
+    private(set) var checkingSetup = false
+    /// When the last setup check ended, shown under Diagnostics.
+    private(set) var lastSetupCheck: Date?
 
     /// `UNUserNotificationCenter` and `SMAppService` need a `.app` bundle.
     let hasBundle = Bundle.main.bundleIdentifier != nil
@@ -180,8 +184,10 @@ final class AppModel {
             poller?.stop()
             jiraFailing = true
             health = []
+            checkingSetup = false
             return
         }
+        checkingSetup = true
         jiraAuth = config.jira.auth
         let service = config.jira.keychainService
         let runner = runner
@@ -229,6 +235,8 @@ final class AppModel {
             let checks = await Task.detached { await doctor.run() }.value
             guard !Task.isCancelled else { return }
             health = checks
+            checkingSetup = false
+            lastSetupCheck = Date()
             if let mcp = jira as? MCPJiraClient, checks.contains(where: { $0.id == .jiraSignIn && $0.ok }) {
                 let email = try? await mcp.accountEmail()
                 guard !Task.isCancelled else { return }
@@ -830,6 +838,29 @@ final class AppModel {
         guard name != selectedTerminal else { return }
         editConfig(failure: "The terminal was not changed") { try ConfigEditor.setTerminalApp(name, in: $0) }
         runDoctor()
+    }
+
+    /// The config file, with `~` for the home folder.
+    var configFilePath: String {
+        (paths.configFile.path as NSString).abbreviatingWithTildeInPath
+    }
+
+    var configFileExists: Bool {
+        FileManager.default.fileExists(atPath: paths.configFile.path)
+    }
+
+    /// Opens the config file in the default text editor (a `.json` file may open elsewhere otherwise).
+    func openConfigFile() {
+        let file = paths.configFile.resolvingSymlinksInPath()
+        guard let editor = NSWorkspace.shared.urlForApplication(toOpen: .plainText) else {
+            NSWorkspace.shared.open(file)
+            return
+        }
+        NSWorkspace.shared.open([file], withApplicationAt: editor, configuration: NSWorkspace.OpenConfiguration())
+    }
+
+    func showConfigFileInFinder() {
+        NSWorkspace.shared.activateFileViewerSelecting([paths.configFile.resolvingSymlinksInPath()])
     }
 
     /// Edits the config file in place; false (after an alert titled `failure`) when it could not.

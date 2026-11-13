@@ -1,12 +1,27 @@
 import SwiftUI
 import TicketPilotCore
 
-/// The Settings window: Open at login, the terminal, the Jira connection, and every setup check.
+/// The Settings window: the config file, Open at login, the terminal, the Jira connection, and every setup check.
 struct SettingsView: View {
     @Bindable var model: AppModel
 
     var body: some View {
         Form {
+            Section("Config") {
+                HStack(spacing: 8) {
+                    Text(model.configFilePath)
+                        .textSelection(.enabled)
+                        .truncationMode(.middle)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    Button("Open", action: model.openConfigFile)
+                        .accessibilityLabel("Open the config file")
+                    Button("Show in Finder", action: model.showConfigFileInFinder)
+                        .accessibilityLabel("Show the config file in Finder")
+                }
+                .controlSize(.small)
+                .disabled(!model.configFileExists)
+            }
             Section {
                 Toggle("Open at login", isOn: $model.openAtLogin)
                     .disabled(!model.hasBundle)
@@ -51,7 +66,12 @@ struct SettingsView: View {
                     }
                 }
                 ForEach(model.health) { check in
-                    CheckRow(ok: check.ok, title: check.id.title, detail: check.detail, fix: check.fix) {
+                    CheckRow(
+                        ok: check.ok,
+                        title: check.id.title,
+                        detail: check.lines.isEmpty ? check.detail : check.lines.joined(separator: "\n"),
+                        fix: check.fix
+                    ) {
                         if check.id == .jiraToken, !check.ok, check.needsToken {
                             Button("Set Jira token…", action: model.setJiraToken)
                         } else if check.id == .jiraSignIn, !check.ok, check.needsToken {
@@ -75,9 +95,20 @@ struct SettingsView: View {
             }
             Section {
                 HStack {
+                    if model.checkingSetup {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Checking…")
+                            .foregroundStyle(.secondary)
+                    } else if let checked = model.lastSetupCheck {
+                        Text("Checked at \(checked.formatted(date: .omitted, time: .shortened))")
+                            .foregroundStyle(.secondary)
+                    }
                     Spacer()
                     Button("Check again", action: model.runDoctor)
+                        .disabled(model.checkingSetup)
                 }
+                .accessibilityElement(children: .contain)
             }
         }
         .formStyle(.grouped)

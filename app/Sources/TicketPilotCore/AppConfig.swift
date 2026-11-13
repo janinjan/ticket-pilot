@@ -65,9 +65,11 @@ public struct RepoConfig: Decodable, Sendable, Hashable {
     public var match: MatchRules
     /// The app the menu bar app opens a run's worktree in; else chosen by the project type.
     public var editor: String?
+    /// The folders of guidelines the plugin reads for this repo, as written in the config.
+    public var guidelines: [String]
 
     private enum CodingKeys: String, CodingKey {
-        case name, path, review, match, editor
+        case name, path, review, match, editor, guidelines
         case mainBranch = "main_branch"
     }
 
@@ -79,6 +81,7 @@ public struct RepoConfig: Decodable, Sendable, Hashable {
         review = try container.decode(String.self, forKey: .review)
         match = try container.decodeIfPresent(MatchRules.self, forKey: .match) ?? MatchRules()
         editor = try container.decodeIfPresent(String.self, forKey: .editor)
+        guidelines = try container.decodeIfPresent([String].self, forKey: .guidelines) ?? []
     }
 }
 

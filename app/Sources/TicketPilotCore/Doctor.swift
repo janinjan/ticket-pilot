@@ -32,6 +32,8 @@ public struct HealthCheck: Equatable, Identifiable, Sendable {
     public var refusedByServer: Bool
     /// For the plugin check: the installed plugin compared with the copy the app carries.
     public var pluginState: PluginState?
+    /// For the repos check: one line per repo (name, folder, main branch, guidelines), shown in Settings.
+    public var lines: [String]
 
     public init(
         id: Kind,
@@ -42,7 +44,8 @@ public struct HealthCheck: Equatable, Identifiable, Sendable {
         blockedRepos: [String] = [],
         needsToken: Bool = false,
         refusedByServer: Bool = false,
-        pluginState: PluginState? = nil
+        pluginState: PluginState? = nil,
+        lines: [String] = []
     ) {
         self.id = id
         self.ok = ok
@@ -53,6 +56,7 @@ public struct HealthCheck: Equatable, Identifiable, Sendable {
         self.needsToken = needsToken
         self.refusedByServer = refusedByServer
         self.pluginState = pluginState
+        self.lines = lines
     }
 }
 
@@ -362,18 +366,27 @@ public struct Doctor: Sendable {
         return HealthCheck(id: .mcp, ok: false, detail: "Not connected: " + concerned.joined(separator: ", "))
     }
 
+    /// One line per repo: its name, folder, main branch and guidelines; a missing folder is marked.
     private func checkRepoPaths() -> HealthCheck {
-        let missing = config.repos.filter {
-            !FileManager.default.fileExists(atPath: ($0.path as NSString).expandingTildeInPath)
-        }.map(\.name)
-        if missing.isEmpty {
-            return HealthCheck(id: .repoPaths, ok: true, detail: "All repo paths exist")
+        var missing: [String] = []
+        let lines = config.repos.map { repo in
+            var parts = [RepoName.display(repo.name), repo.path, repo.mainBranch]
+            if !repo.guidelines.isEmpty {
+                parts.append("guidelines: " + repo.guidelines.joined(separator: ", "))
+            }
+            let line = parts.joined(separator: " · ")
+            guard FileManager.default.fileExists(atPath: (repo.path as NSString).expandingTildeInPath) else {
+                missing.append(repo.name)
+                return line + " (not found)"
+            }
+            return line
         }
         return HealthCheck(
             id: .repoPaths,
-            ok: false,
-            detail: "Path not found for: " + missing.joined(separator: ", "),
-            blockedRepos: missing
+            ok: missing.isEmpty,
+            detail: missing.isEmpty ? "All repo paths exist" : "Path not found for: " + missing.joined(separator: ", "),
+            blockedRepos: missing,
+            lines: lines
         )
     }
 
