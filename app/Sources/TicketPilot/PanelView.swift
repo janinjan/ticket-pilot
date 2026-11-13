@@ -47,6 +47,12 @@ struct PanelView: View {
         // Top-aligned, should the window be taller for a moment: never a gap under the menu bar.
         .frame(maxHeight: .infinity, alignment: .top)
         .background(HostWindowReader(host: host))
+        // The panel's window becomes key each time the panel opens.
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
+            if let window = host.window, note.object as? NSWindow === window {
+                model.panelOpened()
+            }
+        }
     }
 
     private var hasList: Bool {
@@ -218,11 +224,10 @@ struct PanelView: View {
         .accessibilityLabel(line.isStuck ? "\(line.name), maybe stuck" : line.name)
     }
 
-    /// Under the card's text: "Review in <git client>" for a finished run and "Release…" on the left, the
-    /// session button on the right.
+    /// Under the card's text: "Review in <git client>" for a finished run on the left, the session button on
+    /// the right.
     private func actionRow(_ line: RunLine) -> some View {
         let gitClient = line.section == .reportReady && model.hasWorktree(runID: line.runID) ? model.gitClient : nil
-        let releasable = model.releasable.contains(line.runID)
         return HStack(spacing: 6) {
             if let gitClient {
                 Button(action: closing { model.reviewInGitClient(runID: line.runID) }) {
@@ -234,27 +239,20 @@ struct PanelView: View {
                 .help("Opens the worktree in \(gitClient), to review its commits")
                 .accessibilityLabel("Review \(line.name) in \(gitClient)")
             }
-            if releasable {
-                Button(action: closing { model.release(runID: line.runID) }) {
-                    Text("Release…")
-                        .lineLimit(1)
-                        .fixedSize()
-                }
-                .buttonStyle(.brandSecondary)
-                .accessibilityLabel("Release \(line.name)")
-            }
             Spacer(minLength: 0)
             sessionButton(line)
         }
         .padding(.top, 2)
     }
 
-    /// The card's "⋯": open the worktree in its editor, or show it in the Finder with its size.
+    /// The card's "⋯": open the worktree in its editor, show it in the Finder with its size, and, for a run
+    /// that can be released, remove it.
     @ViewBuilder
     private func runMenu(_ line: RunLine) -> some View {
         let editor = model.editors[line.runID]
         let finderTitle = model.showInFinderTitle(runID: line.runID)
-        if editor != nil || finderTitle != nil {
+        let releasable = model.releasable.contains(line.runID)
+        if editor != nil || finderTitle != nil || releasable {
             Menu {
                 if let editor {
                     Button("Open in \(editor.app)", action: closing { model.openInEditor(runID: line.runID) })
@@ -263,6 +261,13 @@ struct PanelView: View {
                 if let finderTitle {
                     Button(finderTitle, action: closing { model.revealWorktree(runID: line.runID) })
                         .accessibilityLabel("\(finderTitle), \(line.name)")
+                }
+                if releasable {
+                    Divider()
+                    Button(action: closing { model.release(runID: line.runID) }) {
+                        Label("Remove worktree…", systemImage: "arrow.triangle.branch")
+                    }
+                    .accessibilityLabel("Remove the worktree of \(line.name)")
                 }
             } label: {
                 Image(systemName: "ellipsis")

@@ -5,28 +5,38 @@ public struct ReleasePlan: Equatable, Sendable {
     public var runID: String
     public var repoPath: String
     public var worktree: String?
-    public var branch: String?
+    /// The run's branch, then the branch checked out in its worktree when it is another one.
+    public var branches: [String]
     public var runFile: URL
     public var mainBranch: String?
     public var lines: [String]
 
-    public static func make(run: Run, runsDirectory: URL, mainBranch: String? = nil) -> ReleasePlan {
+    /// `checkedOutBranch` is the branch checked out in the run's worktree (`Releaser.checkedOutBranch`), when
+    /// the work went on there after the run.
+    public static func make(
+        run: Run, runsDirectory: URL, mainBranch: String? = nil, checkedOutBranch: String? = nil
+    ) -> ReleasePlan {
         let runFile = runsDirectory.appendingPathComponent("\(run.id).json")
+        var branches: [String] = []
+        for branch in [run.branch, checkedOutBranch] {
+            guard let branch, !branch.isEmpty, !branches.contains(branch) else { continue }
+            branches.append(branch)
+        }
         var lines: [String] = []
         if let worktree = run.worktree { lines.append("Worktree: \(worktree)") }
-        if let branch = run.branch { lines.append("Local branch: \(branch)") }
+        lines += branches.map { "Local branch: \($0)" }
         lines.append("Run state: \(runFile.path)")
         return ReleasePlan(
-            runID: run.id, repoPath: run.repoPath, worktree: run.worktree, branch: run.branch,
+            runID: run.id, repoPath: run.repoPath, worktree: run.worktree, branches: branches,
             runFile: runFile, mainBranch: mainBranch, lines: lines
         )
     }
 }
 
 public enum Releasable {
-    /// Runs whose ticket is Done in Jira.
+    /// Runs that are finished, or whose ticket is Done in Jira (a run left before its end).
     public static func runIDs(runs: [Run], categories: [String: JiraIssue.StatusCategory]) -> Set<String> {
-        Set(runs.filter { categories[$0.key] == .done }.map(\.id))
+        Set(runs.filter { $0.status == .done || categories[$0.key] == .done }.map(\.id))
     }
 }
 
@@ -74,9 +84,11 @@ extension ReleaseError {
     }
 }
 
-/// Removes a worktree, its branch and the run file, in that order, stopping at the first failure.
-/// Never forces anything: git refuses a dirty worktree (`worktree remove`) and an unmerged branch (`branch -d`).
-/// Refuses up front, deleting nothing, when the branch is the main branch or the one checked out in the repo.
+/// Removes a worktree, its branches and the run file, in that order, stopping at the first failure.
+/// Never loses work: git refuses a dirty worktree (`worktree remove`), and a branch is deleted only when
+/// `origin/<main branch>` has all its commits by content (merged under other hashes, as Gerrit does), or
+/// when git itself sees it merged (`branch -d`). Refuses up front, deleting nothing, when a branch is the
+/// main branch or the one checked out in the repo.
 public struct Releaser: Sendable {
     private static let git = "/usr/bin/git"
     private static let mainBranchNames: Set<String> = ["main", "master"]
@@ -87,7 +99,7 @@ public struct Releaser: Sendable {
     }
 
     public func release(_ plan: ReleasePlan) throws(ReleaseError) {
-        if let branch = plan.branch, isProtected(branch, plan: plan) {
+        if let branch = plan.branches.first(where: { isProtected($0, plan: plan) }) {
             throw .protectedBranch(branch: branch)
         }
         if let worktree = plan.worktree {
@@ -100,8 +112,9 @@ public struct Releaser: Sendable {
             guard result.status == 0 else { throw .worktreeNotRemoved(message: result.error) }
         }
         // A branch already deleted (with the `branch -D` the alert shows) only needs the run file removed.
-        if let branch = plan.branch, branchExists(branch, repoPath: plan.repoPath) {
-            let result = execute(["-C", plan.repoPath, "branch", "-d", "--", branch])
+        for branch in plan.branches where branchExists(branch, repoPath: plan.repoPath) {
+            let delete = isMergedByContent(branch, plan: plan) ? "-D" : "-d"
+            let result = execute(["-C", plan.repoPath, "branch", delete, "--", branch])
             guard result.status == 0 else {
                 let command = "git -C \(SessionCommand.quote(plan.repoPath)) branch -D \(SessionCommand.quote(branch))"
                 throw .branchNotDeleted(message: result.error, command: command)
@@ -118,6 +131,23 @@ public struct Releaser: Sendable {
         if Self.mainBranchNames.contains(branch) || branch == plan.mainBranch { return true }
         let head = execute(["-C", plan.repoPath, "symbolic-ref", "--quiet", "--short", "HEAD"])
         return head.status == 0 && head.output.trimmingCharacters(in: .whitespacesAndNewlines) == branch
+    }
+
+    /// The branch checked out in `worktree`, nil when it is detached, gone or git fails.
+    public func checkedOutBranch(worktree: String) -> String? {
+        let result = execute(["-C", worktree, "branch", "--show-current"])
+        let branch = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+        return result.status == 0 && !branch.isEmpty ? branch : nil
+    }
+
+    /// `origin/<main branch>` has every commit of `branch`, compared by content: nothing would be lost.
+    private func isMergedByContent(_ branch: String, plan: ReleasePlan) -> Bool {
+        guard let mainBranch = plan.mainBranch else { return false }
+        let result = execute([
+            "-C", plan.repoPath, "rev-list", "--count", "--cherry-pick", "--right-only", "--no-merges",
+            "origin/\(mainBranch)...refs/heads/\(branch)",
+        ])
+        return result.status == 0 && result.output.trimmingCharacters(in: .whitespacesAndNewlines) == "0"
     }
 
     /// Only a clean "no such ref" (status 1) counts as absent: any other failure goes on to

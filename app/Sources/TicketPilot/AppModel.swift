@@ -13,7 +13,10 @@ final class AppModel {
     /// Also true while there is no valid config or no token: Jira is not read at all.
     private(set) var jiraFailing = false
     private(set) var health: [HealthCheck] = []
-    private(set) var releasable: Set<String> = []
+    /// The Jira status category of each run's ticket, from the last poll.
+    private var ticketCategories: [String: JiraIssue.StatusCategory] = [:]
+    /// The runs that can be released: finished, or with their ticket Done in Jira.
+    var releasable: Set<String> { Releasable.runIDs(runs: runs, categories: ticketCategories) }
     private(set) var configError: String?
     private(set) var openAtLoginState = false
     /// Disk usage of each run's worktree, by run id.
@@ -354,7 +357,7 @@ final class AppModel {
         let polledRuns = runs
         let keys = Set(polledRuns.map(\.key)).sorted()
         guard !keys.isEmpty, let categories = try? await jira.statusCategories(of: keys) else { return }
-        releasable = Releasable.runIDs(runs: polledRuns, categories: categories)
+        ticketCategories = categories
     }
 
     // MARK: - Runs
@@ -501,9 +504,10 @@ final class AppModel {
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
     }
 
-    /// Counts the commits of each finished run off the main actor, again only when its run file or its
-    /// repo's main branch changed. Without a worktree or a known main branch (no config yet), nothing is
-    /// recorded, so the run is counted once the config is loaded; the card says "ready for review" meanwhile.
+    /// Counts the commits of each finished run off the main actor, again only when its run file, its repo's
+    /// main branch or the commit `origin/<main>` points to changed (after a fetch: the app never fetches).
+    /// Without a worktree or a known main branch (no config yet), nothing is recorded, so the run is counted
+    /// once the config is loaded; the card says "ready for review" meanwhile.
     private func countCommits() {
         let finished = runs.filter { $0.status == .done }
         let ids = Set(finished.map(\.id))
@@ -514,21 +518,27 @@ final class AppModel {
             guard let worktree = run.worktree,
                   let mainBranch = config?.repos.first(where: { $0.name == run.repo })?.mainBranch
             else { continue }
-            let version = CommitCountKey(updatedAt: run.updatedAt, mainBranch: mainBranch)
-            guard countedFor[run.id] != version else { continue }
-            countedFor[run.id] = version
             let runID = run.id
-            let branch = run.branch
+            let updatedAt = run.updatedAt
             Task { [weak self] in
+                let head = await Task.detached { counter.mainHead(worktree: worktree, mainBranch: mainBranch) }.value
+                let version = CommitCountKey(updatedAt: updatedAt, mainBranch: mainBranch, mainHead: head)
+                guard let self, self.countedFor[runID] != version else { return }
+                self.countedFor[runID] = version
                 let count = await Task.detached {
-                    counter.count(worktree: worktree, branch: branch, mainBranch: mainBranch)
+                    counter.count(worktree: worktree, mainBranch: mainBranch)
                 }.value
                 // A newer count of the same run (or its removal) wins over this one.
-                guard let self, self.countedFor[runID] == version else { return }
+                guard self.countedFor[runID] == version else { return }
                 self.commitCounts[runID] = count
                 self.updatePresentation()
             }
         }
+    }
+
+    /// The panel opened: counts again the runs whose `origin/<main>` moved since their last count.
+    func panelOpened() {
+        countCommits()
     }
 
     /// Measures the worktree of each finished run off the main actor, again only when its run file changed.
@@ -754,9 +764,12 @@ final class AppModel {
     func release(runID: String) {
         guard releasable.contains(runID), let run = runs.first(where: { $0.id == runID }) else { return }
         let mainBranch = config?.repos.first { $0.name == run.repo }?.mainBranch
-        let plan = ReleasePlan.make(run: run, runsDirectory: paths.runsDirectory, mainBranch: mainBranch)
-        guard Alerts.confirmRelease(run, plan: plan) else { return }
         let releaser = Releaser(runner: untimedRunner)
+        let checkedOut = run.worktree.flatMap { releaser.checkedOutBranch(worktree: $0) }
+        let plan = ReleasePlan.make(
+            run: run, runsDirectory: paths.runsDirectory, mainBranch: mainBranch, checkedOutBranch: checkedOut
+        )
+        guard Alerts.confirmRelease(run, plan: plan) else { return }
         Task { [weak self] in
             let failure = await Task.detached { () -> ReleaseError? in
                 do throws(ReleaseError) {
@@ -768,8 +781,6 @@ final class AppModel {
             }.value
             if let failure {
                 Alerts.show(failure.alertText)
-            } else {
-                self?.releasable.remove(runID)
             }
             self?.refreshRuns()
         }
@@ -1117,6 +1128,7 @@ final class AppModel {
 private struct CommitCountKey: Equatable {
     var updatedAt: Date
     var mainBranch: String
+    var mainHead: String?
 }
 
 private extension String {

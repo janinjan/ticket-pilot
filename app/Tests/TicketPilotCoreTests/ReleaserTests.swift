@@ -26,8 +26,16 @@ import Testing
             return result
         }
 
-        func branches() throws -> String {
-            try git(["branch", "--list", "feature"]).output.trimmingCharacters(in: .whitespacesAndNewlines)
+        func branches(_ pattern: String = "feature") throws -> String {
+            try git(["branch", "--list", pattern]).output.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        /// A commit that adds `name` with its own content, in `directory` (the repo by default).
+        func commitFile(_ name: String, in directory: URL? = nil) throws {
+            let folder = directory ?? repo
+            try Data(name.utf8).write(to: folder.appendingPathComponent(name))
+            try git(["add", name], in: folder)
+            try git(["commit", "-q", "-m", name], in: folder)
         }
     }
 
@@ -129,6 +137,49 @@ import Testing
         #expect(f.fileManager.fileExists(atPath: f.runFile.path))
     }
 
+    @Test func test_branchMergedUnderAnotherHashIsDeleted() throws {
+        let f = try makeFixture()
+        defer { f.cleanUp() }
+        try f.commitFile("work.txt", in: f.worktree)
+        // The same change lands on the main branch under another hash, as a Gerrit submit does.
+        try f.commitFile("work.txt")
+        try f.git(["update-ref", "refs/remotes/origin/main", "main"])
+        let plan = ReleasePlan.make(run: f.run, runsDirectory: f.runsDirectory, mainBranch: "main")
+        try Releaser(runner: SystemProcessRunner()).release(plan)
+        #expect(try f.branches().isEmpty)
+        #expect(!f.fileManager.fileExists(atPath: f.runFile.path))
+    }
+
+    @Test func test_branchWithWorkMissingFromTheMainBranchIsKept() throws {
+        let f = try makeFixture()
+        defer { f.cleanUp() }
+        try f.commitFile("work.txt", in: f.worktree)
+        try f.git(["update-ref", "refs/remotes/origin/main", "main"])
+        let plan = ReleasePlan.make(run: f.run, runsDirectory: f.runsDirectory, mainBranch: "main")
+        #expect(throws: ReleaseError.self) { try Releaser(runner: SystemProcessRunner()).release(plan) }
+        #expect(!(try f.branches().isEmpty))
+        #expect(f.fileManager.fileExists(atPath: f.runFile.path))
+    }
+
+    @Test func test_theBranchCheckedOutInTheWorktreeIsDeletedToo() throws {
+        let f = try makeFixture()
+        defer { f.cleanUp() }
+        try f.git(["checkout", "-q", "-b", "follow-up"], in: f.worktree)
+        let releaser = Releaser(runner: SystemProcessRunner())
+        let checkedOut = releaser.checkedOutBranch(worktree: f.worktree.path)
+        #expect(checkedOut == "follow-up")
+        let plan = ReleasePlan.make(run: f.run, runsDirectory: f.runsDirectory, checkedOutBranch: checkedOut)
+        #expect(plan.lines == [
+            "Worktree: \(f.worktree.path)",
+            "Local branch: feature",
+            "Local branch: follow-up",
+            "Run state: \(f.runFile.path)",
+        ])
+        try releaser.release(plan)
+        #expect(try f.branches().isEmpty)
+        #expect(try f.branches("follow-up").isEmpty)
+    }
+
     @Test func test_releaseCanBeRetriedAfterUnmergedBranch() throws {
         let f = try makeFixture()
         defer { f.cleanUp() }
@@ -193,19 +244,22 @@ import Testing
         #expect(f.fileManager.fileExists(atPath: f.runFile.path))
     }
 
-    @Test func test_releasableOnlyForDoneTickets() {
-        func run(_ id: String, _ key: String) -> Run {
+    @Test func test_releasableForFinishedRunsAndDoneTickets() {
+        func run(_ id: String, _ key: String, _ status: Run.Status = .running) -> Run {
             Run(
                 id: id, key: key, repo: "ios", repoPath: "/r", worktree: nil, branch: nil,
-                sessionID: nil, session: nil, step: 1, stepName: "x", status: .running,
+                sessionID: nil, session: nil, step: 1, stepName: "x", status: status,
                 waiting: nil, history: [], updatedAt: Date()
             )
         }
-        let runs = [run("ABC-1-ios", "ABC-1"), run("ABC-2-ios", "ABC-2"), run("ABC-3-ios", "ABC-3")]
+        let runs = [
+            run("ABC-1-ios", "ABC-1"), run("ABC-2-ios", "ABC-2"), run("ABC-3-ios", "ABC-3"),
+            run("ABC-4-ios", "ABC-4", .done),
+        ]
         let ids = Releasable.runIDs(runs: runs, categories: [
-            "ABC-1": .done, "ABC-2": .inProgress,
+            "ABC-1": .done, "ABC-2": .inProgress, "ABC-4": .inProgress,
         ])
-        #expect(ids == ["ABC-1-ios"])
+        #expect(ids == ["ABC-1-ios", "ABC-4-ios"])
     }
 
     @Test func test_diskUsageReadsKilobytes() throws {
