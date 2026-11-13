@@ -94,12 +94,18 @@ public struct PluginInstaller: Sendable {
         return results
     }
 
-    /// "TicketPilot will run: …", for the alert asked before `run`.
+    /// "TicketPilot will run: …", for the alert asked before `run`: "Update the Claude Code plugin?" when the
+    /// plan updates the installed plugin, else "Install the Claude Code plugin?".
     public static func confirmation(_ plan: [PluginCommand]) -> AlertText {
         AlertText(
-            title: "Install the Claude Code plugin?",
+            title: "\(confirmButton(plan)) the Claude Code plugin?",
             message: (["TicketPilot will run:"] + plan.map(\.display)).joined(separator: "\n")
         )
+    }
+
+    /// The alert's button: "Update" when the plan updates the installed plugin, else "Install".
+    public static func confirmButton(_ plan: [PluginCommand]) -> String {
+        plan.contains { $0.arguments.starts(with: ["plugin", "update"]) } ? "Update" : "Install"
     }
 
     private func marketplaceNames() throws(PluginInstallError) -> [String] {

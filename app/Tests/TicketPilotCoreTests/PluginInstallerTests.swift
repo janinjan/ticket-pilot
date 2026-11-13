@@ -139,10 +139,14 @@ private final class FakeClaude: ProcessRunning, @unchecked Sendable {
 
     @Test func test_confirmationListsTheExactCommands() throws {
         let runner = FakeClaude(listOutput: Self.withMarketplace)
-        let plan = try installer(runner).plan(pluginInstalled: true)
-        #expect(PluginInstaller.confirmation(plan) == AlertText(
-            title: "Install the Claude Code plugin?",
+        let update = try installer(runner).plan(pluginInstalled: true)
+        #expect(PluginInstaller.confirmation(update) == AlertText(
+            title: "Update the Claude Code plugin?",
             message: "TicketPilot will run:\nclaude plugin marketplace update ticket-pilot\nclaude plugin update ticket-pilot@ticket-pilot"
         ))
+        #expect(PluginInstaller.confirmButton(update) == "Update")
+        let install = try installer(runner).plan(pluginInstalled: false)
+        #expect(PluginInstaller.confirmation(install).title == "Install the Claude Code plugin?")
+        #expect(PluginInstaller.confirmButton(install) == "Install")
     }
 }

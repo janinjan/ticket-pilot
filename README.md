@@ -196,7 +196,7 @@ A small macOS app (`app/`, Swift, macOS 14 or later) that lives in the menu bar,
 
 ### The plugin it carries
 
-When the plugin is missing, or older than the copy in the app, the panel shows "Install the Claude Code plugin…" or "Update the Claude Code plugin (<installed> → <carried>)…" (Settings › Diagnostics has the same as "Install…" or "Update…"). The app first reads `claude plugin marketplace list`, then shows the exact commands it will run and waits for Install:
+When the plugin is missing, or older than the copy in the app, the panel shows "Install the Claude Code plugin…" or "Update the Claude Code plugin (<installed> → <carried>)…" (Settings › Diagnostics has the same as "Install…" or "Update…"). The app first reads `claude plugin marketplace list`, then shows the exact commands it will run and waits for Install (Update when the plugin is already installed):
 
 - if a marketplace named `ticket-pilot` is already configured (for example from GitHub), it stays the source: `claude plugin marketplace update ticket-pilot`, then `claude plugin update ticket-pilot@ticket-pilot` (or `claude plugin install ticket-pilot@ticket-pilot` when the plugin is not installed);
 - otherwise the copy inside the app becomes the marketplace: `claude plugin marketplace add /Applications/TicketPilot.app/Contents/Resources/plugin`, then `claude plugin install ticket-pilot@ticket-pilot`.

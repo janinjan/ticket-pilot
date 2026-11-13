@@ -960,7 +960,7 @@ final class AppModel {
                 Alerts.show(error.alertText)
                 return
             }
-            guard Alerts.confirm(PluginInstaller.confirmation(commands), button: "Install") else {
+            guard Alerts.confirm(PluginInstaller.confirmation(commands), button: PluginInstaller.confirmButton(commands)) else {
                 installingPlugin = false
                 return
             }
