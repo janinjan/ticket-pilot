@@ -22,6 +22,8 @@
 	<string>14.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>TicketPilot opens and focuses the Claude Code session of a run in your terminal.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 </dict>

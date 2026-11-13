@@ -1,0 +1,77 @@
+name: Release
+
+# On a version tag: builds the app, signs it with the Developer ID, notarizes it and attaches the zip to
+# the GitHub release of the tag. The signing identity and the notary key are secrets of the protected
+# "release" environment: the job waits for the repository owner's approval before it can read them.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  app:
+    runs-on: macos-latest
+    environment: release
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Name the temporary keychain
+        run: echo "KEYCHAIN=$RUNNER_TEMP/release.keychain-db" >> "$GITHUB_ENV"
+      - name: Select the newest Xcode
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+          swift --version
+      - name: Check the tag matches the plugin version
+        run: |
+          version=$(/usr/bin/python3 -c 'import json; print(json.load(open(".claude-plugin/plugin.json"))["version"])')
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "The tag $GITHUB_REF_NAME does not match the plugin version $version." >&2
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - name: Import the Developer ID and the notary key into a temporary keychain
+        env:
+          P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          NOTARY_KEY_BASE64: ${{ secrets.NOTARY_KEY_P8_BASE64 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          keychain_password=$(uuidgen)
+          security create-keychain -p "$keychain_password" "$KEYCHAIN"
+          security set-keychain-settings -t 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$keychain_password" "$KEYCHAIN"
+          printf '%s' "$P12_BASE64" | base64 --decode > "$RUNNER_TEMP/developer-id.p12"
+          security import "$RUNNER_TEMP/developer-id.p12" -k "$KEYCHAIN" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          identity=$(security find-identity -v -p codesigning "$KEYCHAIN" | awk '/Developer ID Application/ { print $2; exit }')
+          if [ -z "$identity" ]; then
+            echo "No Developer ID Application identity in the imported certificate." >&2
+            exit 1
+          fi
+          echo "TICKET_PILOT_SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+          printf '%s' "$NOTARY_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/notary-key.p8"
+          xcrun notarytool store-credentials ticketpilot-release --key "$RUNNER_TEMP/notary-key.p8" \
+            --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" --keychain "$KEYCHAIN"
+          rm -f "$RUNNER_TEMP/developer-id.p12" "$RUNNER_TEMP/notary-key.p8"
+      - name: Build and sign the app
+        run: ./build-app.sh dist/TicketPilot.app
+      - name: Notarize the app
+        env:
+          TICKET_PILOT_NOTARY_PROFILE: ticketpilot-release
+        run: TICKET_PILOT_NOTARY_KEYCHAIN="$KEYCHAIN" ./notarize.sh dist/TicketPilot.app "dist/TicketPilot-$VERSION.zip"
+      - name: Attach the zip to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "dist/TicketPilot-$VERSION.zip" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "dist/TicketPilot-$VERSION.zip" --title "$GITHUB_REF_NAME" --generate-notes
+          fi
+      - name: Delete the temporary keychain
+        if: always()
+        run: security delete-keychain "$KEYCHAIN" || true
