@@ -14,7 +14,7 @@ def section(title):
 
 class ReadmeTests(unittest.TestCase):
     def test_readme_sections(self):
-        for title in ("What it does", "Install", "Configure", "Usage", "Safety"):
+        for title in ("Quick start", "What it does", "Install", "Configure", "Usage", "Safety"):
             self.assertIsNotNone(section(title), title)
 
     def test_ci_review_replay_is_documented(self):
@@ -29,6 +29,28 @@ class ReadmeTests(unittest.TestCase):
         self.assertIn("claude plugin marketplace add", install)
         self.assertIn("claude plugin install ticket-pilot@ticket-pilot", install)
         self.assertIn("--plugin-dir", install)
+        self.assertIn("claude plugin marketplace add janinjan/ticket-pilot", install)
+        self.assertIn("./install.sh --from-source", install)
+        self.assertIn("https://github.com/janinjan/ticket-pilot/releases", install)
+
+    def test_quick_start_installs_then_starts(self):
+        quick = section("Quick start")
+        self.assertIn("/releases/latest", quick)
+        self.assertIn("claude plugin install ticket-pilot@ticket-pilot", quick)
+        self.assertIn("/ticket-pilot:start <KEY>", quick)
+
+    def test_no_placeholder_owner_nor_missing_command(self):
+        self.assertNotIn("<owner>", README)
+        self.assertNotIn("/ticket-pilot:setup", README)
+
+    def test_releasing_is_documented_for_maintainers(self):
+        releasing = (ROOT / "docs" / "RELEASING.md").read_text()
+        for text in (
+            "notarize.sh", "release.yml", "environment", "DEVELOPER_ID_P12_BASE64",
+            "DEVELOPER_ID_P12_PASSWORD", "NOTARY_KEY_P8_BASE64", "NOTARY_KEY_ID", "NOTARY_ISSUER_ID",
+        ):
+            self.assertIn(text, releasing)
+        self.assertIn("docs/RELEASING.md", README)
 
     def test_configure_mentions_check(self):
         configure = section("Configure")
@@ -51,7 +73,6 @@ class ReadmeTests(unittest.TestCase):
     def test_menu_bar_app_section(self):
         app = section("Menu bar app")
         self.assertIsNotNone(app)
-        self.assertIn("./install.sh --from-source", app)
         self.assertIn("runs/*.json", app)
         self.assertIn("in `app/` inside the state directory", app)
         self.assertIn("never launches `claude` without a click", app)
@@ -65,7 +86,7 @@ class ReadmeTests(unittest.TestCase):
             self.assertIn("~/.claude/plugins/cache/ticket-pilot/ticket-pilot/<version>/", README)
             self.assertIn("TP_ROOT", text)
         configure = section("Configure")
-        self.assertIn("ls -d ~/.claude/plugins/cache/ticket-pilot/ticket-pilot/*/ | tail -1", configure)
+        self.assertIn("ls -d ~/.claude/plugins/cache/ticket-pilot/ticket-pilot/*/ | sort -V | tail -1", configure)
         self.assertIn('alias tp="$TP_ROOT/bin/tp"', configure)
         self.assertIn('"$TP_ROOT/config.example.json"', configure)
         self.assertIn("--plugin-dir", configure)

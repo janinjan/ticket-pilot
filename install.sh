@@ -7,7 +7,8 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
 if [ "${1:-}" != "--from-source" ]; then
-  echo "Installing from a release is not available yet: it arrives with /ticket-pilot:setup." >&2
+  echo "To install a release, download TicketPilot-<version>.zip from https://github.com/janinjan/ticket-pilot/releases," >&2
+  echo "unzip it and move TicketPilot.app to /Applications." >&2
   echo "To build and install the app from this checkout, run: ./install.sh --from-source" >&2
   exit 2
 fi

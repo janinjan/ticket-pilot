@@ -56,8 +56,8 @@ class InstallScriptTests(unittest.TestCase):
             ["bash", str(SCRIPT)], capture_output=True, text=True, cwd="/",
         )
         self.assertEqual(result.returncode, 2)
-        self.assertIn("/ticket-pilot:setup", result.stderr)
-        self.assertIn("release", result.stderr)
+        self.assertIn("https://github.com/janinjan/ticket-pilot/releases", result.stderr)
+        self.assertIn("--from-source", result.stderr)
 
 
 
