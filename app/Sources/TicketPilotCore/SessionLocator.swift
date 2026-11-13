@@ -17,10 +17,17 @@ public struct TerminalSurface: Equatable, Sendable {
 public enum SessionLocator {
     private static let spinnerGlyphs: [Character] = ["✳", "✻", "◐", "◑", "◒", "◓"]
 
-    /// The folders a session can be in, most specific first: where its last hook ran, its worktree, its repo.
-    public static func candidateFolders(for run: Run) -> [String] {
+    /// The folders a session can be in, most specific first: where its last hook ran, where it was started
+    /// (the first `cwd` of its transcript: the folder its terminal tab reports, even after the session moved
+    /// to another one), its worktree, its repo.
+    public static func candidateFolders(
+        for run: Run, projectsDirectory: URL = SessionCommand.defaultProjectsDirectory()
+    ) -> [String] {
+        let started = run.sessionID.flatMap {
+            SessionCommand.transcriptDirectory(sessionID: $0, projectsDirectory: projectsDirectory)
+        }
         var folders: [String] = []
-        for path in [run.session?.cwd, run.worktree, run.repoPath] {
+        for path in [run.session?.cwd, started, run.worktree, run.repoPath] {
             guard let path, !path.isEmpty else { continue }
             let folder = standardized(path)
             if !folders.contains(folder) { folders.append(folder) }

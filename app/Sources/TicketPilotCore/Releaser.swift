@@ -121,6 +121,10 @@ public struct Releaser: Sendable {
             }
         }
         do {
+            let report = plan.runFile.deletingPathExtension().appendingPathExtension("report.md")
+            if FileManager.default.fileExists(atPath: report.path) {
+                try FileManager.default.removeItem(at: report)
+            }
             try FileManager.default.removeItem(at: plan.runFile)
         } catch {
             throw .runFileNotRemoved(message: error.localizedDescription)

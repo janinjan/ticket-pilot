@@ -267,7 +267,7 @@ Write a short report in the user's language, every point with its proof:
 - **decisions taken alone**, open to challenge;
 - every ❓ left.
 
-Then run `"<plugin-root>/bin/tp" run-done <id>`.
+Save the report, word for word as shown to the user, command to send the branch included, so the menu bar app can open it once the session has moved on: `"<plugin-root>/bin/tp" run-report <id> <<'REPORT'` … `REPORT`. Then run `"<plugin-root>/bin/tp" run-done <id>`.
 
 End the report with the command the user runs to send the branch, chosen by the repo entry's `review`, printed for the user only (do not run it):
 
@@ -276,14 +276,14 @@ End the report with the command the user runs to send the branch, chosen by the 
 
 ## After the report
 
-The user often reacts to the report: a naming, a test result to correct, a line to remove. A remark that only corrects the report (a wording of the test plan, a ❓ the user answers) → fix the report, nothing else. A remark that changes the code or the commits reopens the run; never patch it outside the steps:
+The user often reacts to the report: a naming, a test result to correct, a line to remove. A remark that only corrects the report (a wording of the test plan, a ❓ the user answers) → fix the report and save it again with `run-report`, nothing else. A remark that changes the code or the commits reopens the run; never patch it outside the steps:
 
 1. Run `"<plugin-root>/bin/tp" run-step <id> 5`: the run is no longer `done`. Make the change on the branch.
 2. Step 6 again (build, tests, toggle OFF).
 3. Step 7 again only if what the user sees in the app changes; otherwise start it with `run-step` and check it as not applicable, citing the diff.
 4. Step 8 again, **reviewer and auditor** on the new full diff: a rename or a removal can leave dead code or a name that no longer fits.
 5. Step 9 again: each change as a fixup into the commit it belongs to, the whole chain verified, the reviewer on every rewritten commit.
-6. Step 10 again: what changed since the last report, then `"<plugin-root>/bin/tp" run-done <id>`.
+6. Step 10 again: what changed since the last report, saved with `run-report` as the full updated report, then `"<plugin-root>/bin/tp" run-done <id>`.
 
 ## Resume
 

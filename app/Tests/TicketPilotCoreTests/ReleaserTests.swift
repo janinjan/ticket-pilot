@@ -84,14 +84,17 @@ import Testing
         ])
     }
 
-    @Test func test_releasesWorktreeBranchAndRunFile() throws {
+    @Test func test_releasesWorktreeBranchRunFileAndReport() throws {
         let f = try makeFixture()
         defer { f.cleanUp() }
+        let report = RunReport.file(runID: f.run.id, runsDirectory: f.runsDirectory)
+        try Data("# Report".utf8).write(to: report)
         let plan = ReleasePlan.make(run: f.run, runsDirectory: f.runsDirectory)
         try Releaser(runner: SystemProcessRunner()).release(plan)
         #expect(!f.fileManager.fileExists(atPath: f.worktree.path))
         #expect(try f.branches().isEmpty)
         #expect(!f.fileManager.fileExists(atPath: f.runFile.path))
+        #expect(!f.fileManager.fileExists(atPath: report.path))
     }
 
     @Test func test_dirtyWorktreeIsKept() throws {

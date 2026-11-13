@@ -4,6 +4,7 @@ import json
 import os
 import tempfile
 import unittest
+import unittest.mock
 
 from ticket_pilot import cli, paths, runs
 
@@ -206,12 +207,31 @@ class RunsCliTests(RunsTestCase):
         self.assertEqual(self.run_cli("run-done", "ABC-1--app")[0], 0)
         self.assertEqual(runs.load("ABC-1--app")["status"], "done")
 
+    def test_cli_run_report_saves_stdin(self):
+        self.run_cli("run-start", "ABC-1", "app", "/tmp/app")
+        with unittest.mock.patch("sys.stdin", io.StringIO("# Report\n\nDone.")):
+            code, out, _ = self.run_cli("run-report", "ABC-1--app")
+        self.assertEqual(code, 0)
+        path = runs.report_path("ABC-1--app")
+        self.assertEqual(out.strip(), str(path))
+        self.assertEqual(path.read_text(encoding="utf-8"), "# Report\n\nDone.\n")
+        self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+
+    def test_cli_run_report_refuses_an_empty_report(self):
+        self.run_cli("run-start", "ABC-1", "app", "/tmp/app")
+        with unittest.mock.patch("sys.stdin", io.StringIO("  \n")):
+            code, _, err = self.run_cli("run-report", "ABC-1--app")
+        self.assertEqual(code, 2)
+        self.assertIn("empty", err)
+        self.assertFalse(runs.report_path("ABC-1--app").exists())
+
     def test_cli_unknown_run_exits_2(self):
         for argv in (
             ("run-show", "nope--x"),
             ("run-step", "nope--x", "2"),
             ("run-wait", "nope--x", "go", "t"),
             ("run-done", "nope--x"),
+            ("run-report", "nope--x"),
             ("run-set", "nope--x", "--branch", "b"),
         ):
             code, _, err = self.run_cli(*argv)

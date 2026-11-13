@@ -68,28 +68,33 @@ public enum SessionCommand {
             .appendingPathComponent(".claude/projects")
     }
 
-    /// The `cwd` on the first transcript line that has one, if that folder exists.
-    static func transcriptDirectory(sessionID: String, projectsDirectory: URL) -> String? {
+    /// The session's transcript, in the first project folder that has it.
+    static func transcriptFile(sessionID: String, projectsDirectory: URL) -> URL? {
         guard isValidSessionID(sessionID) else { return nil }
         let manager = FileManager.default
         guard let projects = try? manager.contentsOfDirectory(
             at: projectsDirectory,
             includingPropertiesForKeys: nil
         ) else { return nil }
-        for project in projects.sorted(by: { $0.path < $1.path }) {
-            let transcript = project.appendingPathComponent("\(sessionID).jsonl")
-            guard let handle = try? FileHandle(forReadingFrom: transcript) else { continue }
-            defer { try? handle.close() }
-            guard let data = try? handle.read(upToCount: 1_048_576) else { continue }
-            for line in data.split(separator: UInt8(ascii: "\n")) {
-                guard let object = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
-                      let cwd = object["cwd"] as? String else { continue }
-                var isDirectory: ObjCBool = false
-                if manager.fileExists(atPath: cwd, isDirectory: &isDirectory), isDirectory.boolValue {
-                    return cwd
-                }
-                return nil
+        return projects.sorted(by: { $0.path < $1.path })
+            .map { $0.appendingPathComponent("\(sessionID).jsonl") }
+            .first { manager.isReadableFile(atPath: $0.path) }
+    }
+
+    /// The `cwd` on the first transcript line that has one, if that folder exists.
+    static func transcriptDirectory(sessionID: String, projectsDirectory: URL) -> String? {
+        guard let transcript = transcriptFile(sessionID: sessionID, projectsDirectory: projectsDirectory),
+              let handle = try? FileHandle(forReadingFrom: transcript) else { return nil }
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: 1_048_576) else { return nil }
+        for line in data.split(separator: UInt8(ascii: "\n")) {
+            guard let object = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
+                  let cwd = object["cwd"] as? String else { continue }
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: cwd, isDirectory: &isDirectory), isDirectory.boolValue {
+                return cwd
             }
+            return nil
         }
         return nil
     }

@@ -151,6 +151,28 @@ def set_done(run_identifier: str) -> dict:
     return run
 
 
+def report_path(run_identifier: str):
+    """Where the final report of a run is kept, next to its state, for the menu bar app to open."""
+    return paths.runs_dir() / ("%s.report.md" % run_identifier)
+
+
+def save_report(run_identifier: str, text: str) -> None:
+    """Replaces the run's report with `text` (Markdown), readable by the user only."""
+    _require(run_identifier)
+    if not text.strip():
+        raise ValueError("the report is empty")
+    target = report_path(run_identifier)
+    descriptor, temp_name = tempfile.mkstemp(dir=str(target.parent), suffix=".tmp")
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(text if text.endswith("\n") else text + "\n")
+        os.replace(temp_name, str(target))
+    except BaseException:
+        if os.path.exists(temp_name):
+            os.unlink(temp_name)
+        raise
+
+
 def update(run_identifier: str, **fields) -> dict:
     run = _require(run_identifier)
     run.update(fields)

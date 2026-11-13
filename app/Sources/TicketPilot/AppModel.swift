@@ -118,6 +118,7 @@ final class AppModel {
     @ObservationIgnored private let picker = RepoPickerWindow()
     @ObservationIgnored private let settingsWindow = AuxiliaryWindow()
     @ObservationIgnored private let aboutWindow = AuxiliaryWindow()
+    @ObservationIgnored private let reportWindows = ReportWindows()
     @ObservationIgnored private var config: AppConfig?
     @ObservationIgnored private var poller: JiraPoller?
     @ObservationIgnored private var notifier: Notifier?
@@ -672,6 +673,15 @@ final class AppModel {
     private func openSessionNow(runID: String) {
         acknowledgeIfDone(runID)
         guard let run = runs.first(where: { $0.id == runID }) else { return }
+        let report = RunReport.file(runID: run.id, runsDirectory: paths.runsDirectory)
+        if RunReport.opensFile(
+            run: run,
+            reportSavedAt: RunReport.modified(report),
+            sessionActiveAt: RunReport.sessionActiveAt(sessionID: run.sessionID)
+        ), let text = try? String(contentsOf: report, encoding: .utf8) {
+            reportWindows.show(runID: run.id, key: run.key, report: text)
+            return
+        }
         let action = SessionAction.forOpening(run)
         if config != nil, terminalChoice.isGhostty {
             openInGhostty(run, action: action)
@@ -794,6 +804,8 @@ final class AppModel {
             }.value
             if let failure {
                 Alerts.show(failure.alertText)
+            } else {
+                self?.reportWindows.close(runID: runID)
             }
             self?.refreshRuns()
         }
@@ -849,9 +861,12 @@ final class AppModel {
         FileManager.default.fileExists(atPath: paths.configFile.path)
     }
 
-    /// Opens the config file in the default text editor (a `.json` file may open elsewhere otherwise).
     func openConfigFile() {
-        let file = paths.configFile.resolvingSymlinksInPath()
+        openInTextEditor(paths.configFile.resolvingSymlinksInPath())
+    }
+
+    /// Opens a file in the default text editor: a `.json` file may otherwise open in an IDE.
+    private func openInTextEditor(_ file: URL) {
         guard let editor = NSWorkspace.shared.urlForApplication(toOpen: .plainText) else {
             NSWorkspace.shared.open(file)
             return

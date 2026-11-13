@@ -22,6 +22,24 @@ import Testing
         #expect(folders == ["/w/sub", "/w", "/r"])
     }
 
+    @Test func foldersIncludeWhereTheSessionWasStartedAfterWhereItLastRan() throws {
+        // The session moved to another folder after it was started: its terminal tab still reports the first.
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("tp-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let started = root.appendingPathComponent("started-here")
+        let project = root.appendingPathComponent("projects/-Users-x")
+        try FileManager.default.createDirectory(at: started, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        try "{\"cwd\":\"\(started.path)\"}\n{\"cwd\":\"/w/sub\"}".write(
+            to: project.appendingPathComponent("s1.jsonl"), atomically: true, encoding: .utf8
+        )
+        let folders = SessionLocator.candidateFolders(
+            for: Self.run(cwd: "/w/sub", worktree: "/w", repoPath: "/r"),
+            projectsDirectory: root.appendingPathComponent("projects")
+        )
+        #expect(folders == ["/w/sub", started.standardizedFileURL.path, "/w", "/r"])
+    }
+
     @Test func foldersDropMissingAndDuplicateEntries() {
         let folders = SessionLocator.candidateFolders(for: Self.run(cwd: "/w/", worktree: "/w", repoPath: "/w/./"))
         #expect(folders == ["/w"])

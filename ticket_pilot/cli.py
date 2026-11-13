@@ -68,6 +68,15 @@ def cmd_run_done(args: argparse.Namespace) -> int:
     return _with_run(args, lambda: runs.set_done(args.run_id))
 
 
+def cmd_run_report(args: argparse.Namespace) -> int:
+    if runs.load(args.run_id) is None:
+        return _fail("unknown run: %s" % args.run_id)
+    code = _with_run(args, lambda: runs.save_report(args.run_id, sys.stdin.read()))
+    if code == 0:
+        print(runs.report_path(args.run_id))
+    return code
+
+
 def cmd_run_show(args: argparse.Namespace) -> int:
     run = runs.load(args.run_id)
     if run is None:
@@ -218,6 +227,10 @@ def build_parser() -> argparse.ArgumentParser:
     done = subparsers.add_parser("run-done", help="mark a run as done")
     done.add_argument("run_id")
     done.set_defaults(func=cmd_run_done)
+
+    report = subparsers.add_parser("run-report", help="save the run's final report, read from stdin")
+    report.add_argument("run_id")
+    report.set_defaults(func=cmd_run_report)
 
     show = subparsers.add_parser("run-show", help="print a run as JSON")
     show.add_argument("run_id")
