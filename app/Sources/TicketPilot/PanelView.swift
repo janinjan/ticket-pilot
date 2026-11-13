@@ -302,7 +302,7 @@ struct PanelView: View {
                     .truncationMode(.tail)
                     .fixedSize(horizontal: false, vertical: true)
                     .help(issue.summary)
-                Text("\(issue.key) · \(issue.statusName)")
+                Text(model.todoContext(issue))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

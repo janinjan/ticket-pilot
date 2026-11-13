@@ -761,6 +761,11 @@ final class AppModel {
         }
     }
 
+    /// The small line under a ticket to do: "KEY · iOS · Backlog" (`TodoList.context`).
+    func todoContext(_ issue: JiraIssue) -> String {
+        TodoList.context(of: issue, repos: config?.repos ?? [])
+    }
+
     func release(runID: String) {
         guard releasable.contains(runID), let run = runs.first(where: { $0.id == runID }) else { return }
         let mainBranch = config?.repos.first { $0.name == run.repo }?.mainBranch

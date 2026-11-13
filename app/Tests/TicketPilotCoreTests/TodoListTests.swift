@@ -48,6 +48,28 @@ private func issue(_ key: String, status: String, category: JiraIssue.StatusCate
         #expect(both.map { $0.issues.map(\.key) } == [["ABC-1"], ["ABC-2"]])
     }
 
+    @Test func test_contextNamesThePlatformsOfTheMatchingRepos() throws {
+        func repo(_ name: String, _ match: MatchRules) throws -> RepoConfig {
+            let json = #"{"name": "\#(name)", "path": "/tmp/\#(name)", "main_branch": "main", "review": "none"}"#
+            var repo = try JSONDecoder().decode(RepoConfig.self, from: Data(json.utf8))
+            repo.match = match
+            return repo
+        }
+        let repos = [
+            try repo("ios", MatchRules(titlePrefixes: ["[iOS]"], components: ["iOS"])),
+            try repo("android", MatchRules(titlePrefixes: ["[AND]"])),
+        ]
+        func ticket(_ summary: String, components: [String] = []) -> JiraIssue {
+            JiraIssue(
+                key: "ABC-1", summary: summary, statusName: "Backlog", statusCategory: .toDo,
+                labels: [], components: components
+            )
+        }
+        #expect(TodoList.context(of: ticket("Show the seller", components: ["iOS"]), repos: repos) == "ABC-1 · iOS · Backlog")
+        #expect(TodoList.context(of: ticket("[iOS][AND] Show the seller"), repos: repos) == "ABC-1 · iOS, Android · Backlog")
+        #expect(TodoList.context(of: ticket("Show the seller"), repos: repos) == "ABC-1 · Backlog")
+    }
+
     @Test func test_aTicketWithARunInProgressIsNotListed() {
         let list = TodoList(
             issues: [
@@ -61,7 +83,7 @@ private func issue(_ key: String, status: String, category: JiraIssue.StatusCate
         #expect((list.ready + list.backlog).map(\.key) == ["ABC-2"])
     }
 
-    @Test func test_onlyRunsNotDoneHideATicket() {
+    @Test func test_anyRunHidesATicket() {
         func run(_ key: String, _ status: Run.Status) -> Run {
             Run(
                 id: "\(key)--ios", key: key, repo: "ios", repoPath: "/r", worktree: nil, branch: nil, sessionID: nil,
@@ -70,6 +92,6 @@ private func issue(_ key: String, status: String, category: JiraIssue.StatusCate
             )
         }
         let runs = [run("ABC-1", .running), run("ABC-2", .waiting), run("ABC-3", .done), run("ABC-4", .unknown)]
-        #expect(TodoList.keysWithRuns(runs) == ["ABC-1", "ABC-2", "ABC-4"])
+        #expect(TodoList.keysWithRuns(runs) == ["ABC-1", "ABC-2", "ABC-3", "ABC-4"])
     }
 }
