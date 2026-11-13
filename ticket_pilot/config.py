@@ -69,6 +69,17 @@ def load(path: Path | None = None) -> dict:
     return cfg
 
 
+def _guidelines_problems(name: str, guidelines) -> list[str]:
+    """`guidelines` is a list of existing paths (folders or files), `~` allowed."""
+    if not isinstance(guidelines, list) or not all(isinstance(path, str) and path for path in guidelines):
+        return ["repos[%s].guidelines must be a list of paths" % name]
+    return [
+        "repos[%s].guidelines does not exist: %s" % (name, path)
+        for path in guidelines
+        if not Path(path).expanduser().exists()
+    ]
+
+
 def validate(cfg: dict) -> list[str]:
     """Return human-readable problems (empty list means the config is OK)."""
     if cfg.get("_missing"):
@@ -113,6 +124,8 @@ def validate(cfg: dict) -> list[str]:
                 problems.append("repos[%s].%s must be a string" % (name, key))
         if "env" in repo:
             problems.extend(_env_problems(name, repo["env"]))
+        if "guidelines" in repo:
+            problems.extend(_guidelines_problems(name, repo["guidelines"]))
         prompt = repo.get("ci_review_prompt")
         if (
             isinstance(prompt, str)

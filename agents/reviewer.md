@@ -32,7 +32,8 @@ Before reviewing, collect the rules that apply to the changed files. Read them, 
 1. The repo's `CLAUDE.md` and `AGENTS.md` at the root of the worktree.
 2. The nearest `CLAUDE.md` / `AGENTS.md` above each changed file, up to the root.
 3. Any documentation file those files point to, when it covers the changed code.
-4. The user's memory for this repo, if present, in `~/.claude/projects/<folder>/memory/*.md`. The worktree path usually differs from the main repo path, and the memory lives under the main repo path. Find it this way:
+4. The team guidelines the caller names (folders or files outside the repo), the parts that cover the changed code.
+5. The user's memory for this repo, if present, in `~/.claude/projects/<folder>/memory/*.md`. The worktree path usually differs from the main repo path, and the memory lives under the main repo path. Find it this way:
    1. Get the main repo root: run `git -C <worktree> rev-parse --path-format=absolute --git-common-dir`; the main repo root is the parent directory of the `.git` directory it prints.
    2. Compute the folder name of a path by replacing every non-alphanumeric character with `-` (for example `/home/a.b/dev/app` gives `-home-a-b-dev-app`).
    3. Try that folder name for the main repo root, then for the worktree path.

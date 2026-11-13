@@ -226,6 +226,20 @@ class OptionalKeyTests(unittest.TestCase):
             (Path(tmp) / "docs" / "review.md").write_text("x")
             self.assertEqual(config.validate(cfg), [])
 
+    def test_guidelines_must_be_existing_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = minimal_repo("android", tmp)
+            guide = Path(tmp) / "team-guidelines" / "docs"
+            repo["guidelines"] = [str(guide)]
+            cfg = config.load(write_json(tmp, {"repos": [repo]}))
+            self.assertEqual(config.validate(cfg), ["repos[android].guidelines does not exist: %s" % guide])
+            guide.mkdir(parents=True)
+            self.assertEqual(config.validate(cfg), [])
+            for wrong in ("docs", [""], [3], {}):
+                repo["guidelines"] = wrong
+                problems = config.validate(config.load(write_json(tmp, {"repos": [repo]})))
+                self.assertIn("repos[android].guidelines must be a list of paths", problems, wrong)
+
     def test_jira_auth_must_be_mcp_or_api_token(self):
         jira = {"site": "https://example.atlassian.net", "email": "a@example.com", "keychain_service": "s"}
         for value in ("mcp", "api_token"):

@@ -48,7 +48,7 @@ Each of these makes the run a failure, whatever the result:
 
 **The CLI.** When this skill loads you are told its base directory (`…/skills/start`). `<plugin-root>` is the directory two levels above it. Every `tp` call below is written `"<plugin-root>/bin/tp" …`: replace `<plugin-root>` with that absolute path. Do not rely on an environment variable to find it.
 
-**The config.** Read the config file with the Read tool: `$TICKET_PILOT_CONFIG` when set, else `~/.config/ticket-pilot/config.json`. In the steps below, "the repo entry" is the entry of `repos` chosen at start-up. Optional keys, used when present: on the repo entry `setup_command`, `sync_command`, `launch_skill`, `ci_review_prompt` (a path relative to the repo root), `ci_review_command`; at the top level `sync_command`, `reviewer_agent`, `auditor_agent`, `backend.repos`, `backend.api_docs`, `max_commit_lines`.
+**The config.** Read the config file with the Read tool: `$TICKET_PILOT_CONFIG` when set, else `~/.config/ticket-pilot/config.json`. In the steps below, "the repo entry" is the entry of `repos` chosen at start-up. Optional keys, used when present: on the repo entry `setup_command`, `sync_command`, `launch_skill`, `ci_review_prompt` (a path relative to the repo root), `ci_review_command`, `guidelines` (folders or files of team conventions kept outside the repo, `~` allowed); at the top level `sync_command`, `reviewer_agent`, `auditor_agent`, `backend.repos`, `backend.api_docs`, `max_commit_lines`.
 
 **The user's memory for this repo.** Claude Code loads the user's memory only for the directory the session started in: a session started in the worktree or in another directory does not see the memory of the repo, and a loaded index is not a rule applied. So read it yourself, at start-up and on resume: the folder is `~/.claude/projects/<name>/memory/`, where `<name>` is the main repo root with every non-alphanumeric character replaced by `-` (for example `/home/a.b/dev/app` gives `-home-a-b-dev-app`). Read its `MEMORY.md` and every file it links about code, naming, vocabulary, tests or commits. No such folder → say so once and carry on. Go over these rules again before naming anything (the branch in step 2, every symbol in step 5, every commit subject in step 9) and before splitting the commits: a rule of the memory wins over a default of this skill, for example the order or the grouping of the split.
 
@@ -119,7 +119,7 @@ Launch **six read-only exploration agents in parallel**, in a single message (fo
    - read their **tests** too: they hold the exact expected values.
 3. **Backend contract**: confirm every consumed field: exact name, type, nullability, computed by the backend or by the client. Sources: `backend.api_docs` and `backend.repos`. Never deduced from front-end code alone.
 4. **Precedents** in the target repo: an analogous feature already shipped; the git history ("how was it done for X?", who and when, with `git log` and `git blame`); how colleagues did the same thing.
-5. **The target module's architecture**: the module's own architectural choice is the reference, not only the neighbouring file. **When in doubt, look at the whole codebase.**
+5. **The target module's architecture**: the module's own architectural choice is the reference, not only the neighbouring file. **When in doubt, look at the whole codebase.** When the repo entry has `guidelines`, read the parts that cover this kind of change (architecture, conventions, testing) and quote them with their `path:line`.
 6. **Local work in progress**: in the target repo and in the other platform repos, someone (often the user) may already have an unpushed local branch on this ticket. For each repo:
    - list the local branches with their last commit date: `git -C "<repo>" for-each-ref refs/heads --sort=-committerdate --format='%(refname:short) %(committerdate:short) %(subject)'`;
    - match the branch names of that list against the ticket key and the topic keywords;
@@ -151,7 +151,7 @@ Run `"<plugin-root>/bin/tp" run-step <id> 4`.
 
 Run `"<plugin-root>/bin/tp" run-step <id> 5`.
 
-- Follow the repo's instructions (`CLAUDE.md`, `AGENTS.md`, linked docs), the user's memory for this repo, and the module's architecture.
+- Follow the repo's instructions (`CLAUDE.md`, `AGENTS.md`, linked docs), the repo entry's `guidelines` (the parts that cover the change), the user's memory for this repo, and the module's architecture.
 - **New behaviour behind a feature toggle**, following the repo's toggle conventions. With the toggle OFF, the current production behaviour stays exactly the same. Exception: when the ticket itself is the clean-up of a toggle, no new toggle is created; the clean-up keeps the toggle-ON behaviour and removes the toggle and its OFF path.
 - Simple but professional code, senior level: no duplication, no needless extension or helper, no superfluous abstraction.
 - Do not touch any module owned by another team (check the repo's ownership files or instructions; ask when unsure).
@@ -203,11 +203,12 @@ Make new files visible to the diff first: `git -C "<worktree>" add --intent-to-a
 1. **Reviewer** on the full diff: agent type `reviewer_agent` from the config, else `ticket-pilot:reviewer`. Give it:
    - the diff (paste it, or for a large one the exact read-only command that prints it, and say it is the whole change);
    - the worktree path;
-   - when the repo entry has `ci_review_prompt`: its absolute path (main repo root + the configured relative path).
+   - when the repo entry has `ci_review_prompt`: its absolute path (main repo root + the configured relative path);
+   - when the repo entry has `guidelines`: their absolute paths.
 
    The reviewer only applies the CI prompt: it is not the CI review itself, which also builds its own context and output. The CI review is replayed in step 9, on each commit, when the repo entry has `ci_review_command`.
 2. Read its answer: line 1 `Score: …`, line 2 the reason. A reason starting with `INPUT MISSING:` is a failure to fix (give the missing input and rerun), never a pass. Every remark, whatever the score, comes as `path:line → problem`; a reason that mentions a remark without listing it is incomplete: ask the reviewer for the lines before going on.
-3. **Auditor**, with a fresh context: agent type `auditor_agent` from the config, else `ticket-pilot:auditor`. Give it ONLY the full diff, the numbered list of requests and the worktree path. No reasoning, no justification.
+3. **Auditor**, with a fresh context: agent type `auditor_agent` from the config, else `ticket-pilot:auditor`. Give it ONLY the full diff, the numbered list of requests, the worktree path and, when the repo entry has `guidelines`, their absolute paths. No reasoning, no justification.
 4. Check each finding against the code. Fix what is confirmed, then rebuild and rerun the tests (step 6 checks), and rerun the agent that raised it until it no longer reports it. A finding you reject is listed in the report with the proof that it is wrong.
 
 ## Step 9 — Commits
