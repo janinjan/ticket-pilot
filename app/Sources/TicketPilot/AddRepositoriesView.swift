@@ -107,17 +107,51 @@ struct AddRepositoriesView: View {
     }
 }
 
-/// The window that hosts `AddRepositoriesView`, one at a time.
+/// Shown while the folder is searched, so that the window opens at once, on the click.
+private struct SearchingRepositoriesView: View {
+    let folder: String
+    let onCancel: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Looking for repositories in \(folder)…")
+            }
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel, action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 420)
+    }
+}
+
+/// The window that hosts `AddRepositoriesView`, one at a time. It opens on the click, while the folder is
+/// searched (`showSearching`): an app is only let to come to the front on a user action, so a window opened
+/// once the search is over would stay behind the others. The list then replaces the search in place.
 @MainActor
 final class AddRepositoriesWindow {
     private var window: NSWindow?
+
+    /// Still open: the user did not cancel or close it while the folder was searched.
+    var isOpen: Bool { window?.isVisible == true }
+
+    func showSearching(folder: URL) {
+        present(AnyView(SearchingRepositoriesView(
+            folder: (folder.path as NSString).abbreviatingWithTildeInPath,
+            onCancel: { [weak self] in self?.close() }
+        )))
+    }
 
     func show(
         folder: URL, proposals: [RepoProposal], existing: [String], existingPlatforms: Set<String>,
         onAdd: @escaping ([RepoEntry]) -> Void, onOtherFolder: @escaping () -> Void
     ) {
-        close()
-        let view = AddRepositoriesView(
+        present(AnyView(AddRepositoriesView(
             folder: (folder.path as NSString).abbreviatingWithTildeInPath,
             proposals: proposals,
             existing: existing,
@@ -125,7 +159,16 @@ final class AddRepositoriesWindow {
             onAdd: onAdd,
             onOtherFolder: onOtherFolder,
             onCancel: { [weak self] in self?.close() }
-        )
+        )))
+    }
+
+    /// Replaces the content of the open window, which stays where it is; else opens one in front.
+    private func present(_ view: AnyView) {
+        if let window, window.isVisible {
+            window.contentViewController = NSHostingController(rootView: view)
+            return
+        }
+        close()
         let window = ClosableWindow(contentViewController: NSHostingController(rootView: view))
         window.title = "Add repositories"
         window.styleMask = [.titled, .closable]

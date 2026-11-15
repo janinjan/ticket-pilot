@@ -359,6 +359,20 @@ struct AtlassianMCPAuthTests {
 
     // MARK: - Access token and refresh
 
+    /// Atlassian's v1 endpoint goes away on 2027-03-01: the app signs in to v2.
+    @Test func test_theAppSignsInToTheV2Endpoint() {
+        #expect(AtlassianMCPAuth.defaultServer == URL(string: "https://mcp.atlassian.com/v2/mcp")!)
+    }
+
+    /// A sign-in made for another endpoint (v1) is not used: the panel offers Connect Jira again.
+    @Test func test_aSignInForAnotherServerReadsAsNotConnected() async throws {
+        let now = Date(timeIntervalSince1970: 10_000)
+        var old = Self.credentials(expiresAt: now.addingTimeInterval(3_000))
+        old.server = "https://mcp.example.com/v0/mcp"
+        let auth = AtlassianMCPAuth(server: Self.server, store: MemoryCredentialStore(old), transport: discoveryTransport(), now: { now })
+        #expect(try await auth.isConnected() == false)
+    }
+
     @Test func test_validTokenIsReturnedWithoutRefresh() async throws {
         let now = Date(timeIntervalSince1970: 10_000)
         let transport = discoveryTransport()
@@ -460,6 +474,34 @@ struct AtlassianMCPAuthTests {
         await #expect(throws: MCPError.unsupportedServer("The MCP server names an authorization server TicketPilot does not trust.")) {
             try await auth.discover()
         }
+    }
+
+    /// Atlassian's v2 endpoint hands the sign-in to auth.atlassian.com, a host of its own (v1 kept it on
+    /// mcp.atlassian.com): the discovery accepts it for Atlassian's server, as Atlassian publishes it.
+    @Test func test_atlassianV2DelegatesToAuthAtlassianCom() async throws {
+        let tenant = "https://auth.atlassian.com/T3nant"
+        let transport = StubTransport { request in
+            switch request.url!.absoluteString {
+            case "https://mcp.atlassian.com/.well-known/oauth-protected-resource/v2/mcp":
+                let json = #"{"resource":"https://mcp.atlassian.com/v2/mcp","authorization_servers":["\#(tenant)"]}"#
+                return (200, [:], Data(json.utf8))
+            case "https://auth.atlassian.com/.well-known/oauth-authorization-server/T3nant":
+                let json = #"""
+                {"issuer":"\#(tenant)","authorization_endpoint":"https://auth.atlassian.com/authorize",\#
+                "token_endpoint":"https://auth.atlassian.com/oauth/token",\#
+                "registration_endpoint":"\#(tenant)/dcr/register",\#
+                "revocation_endpoint":"https://auth.atlassian.com/oauth/revoke",\#
+                "code_challenge_methods_supported":["S256"]}
+                """#
+                return (200, [:], Data(json.utf8))
+            default:
+                return (404, [:], Data())
+            }
+        }
+        let auth = AtlassianMCPAuth(server: AtlassianMCPAuth.defaultServer, store: MemoryCredentialStore(), transport: transport)
+        let discovery = try await auth.discover()
+        #expect(discovery.metadata.registrationEndpoint?.absoluteString == "\(tenant)/dcr/register")
+        #expect(discovery.resource == "https://mcp.atlassian.com/v2/mcp")
     }
 
     @Test func test_disconnectDuringARefreshStoresNothing() async throws {

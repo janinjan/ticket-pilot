@@ -3,7 +3,14 @@ import Foundation
 /// Read-only Jira through the Atlassian Remote MCP server's tools, with the Atlassian sign-in: the only way
 /// TicketPilot reads Jira.
 public actor MCPJiraClient: JiraSearching {
-    private static let openAssignedJQL = "assignee = currentUser() AND statusCategory != Done"
+    private static let assigned = "assignee = currentUser()"
+    /// Category ids, the same on every site (3 Done, 4 In Progress, the rest To Do). The v2 endpoint names a
+    /// ticket's category only in the site's language ("En cours"), so each category is asked for by id.
+    private static let categoryQueries: [(JiraIssue.StatusCategory, String)] = [
+        (.done, "statusCategory = 3"),
+        (.inProgress, "statusCategory = 4"),
+        (.toDo, "statusCategory not in (3, 4)"),
+    ]
     private static let fields: [String] = ["summary", "status", "labels", "components"]
     private static let pageSize = 100
     private static let maxPages = 50
@@ -27,12 +34,12 @@ public actor MCPJiraClient: JiraSearching {
     }
 
     public func openAssignedIssues() async throws(JiraError) -> [JiraIssue] {
-        try await search(jql: Self.openAssignedJQL)
+        try await searchByCategory(Self.assigned, categories: [.inProgress, .toDo])
     }
 
     public func statusCategories(of keys: [String]) async throws(JiraError) -> [String: JiraIssue.StatusCategory] {
         guard !keys.isEmpty else { return [:] }
-        let issues = try await search(jql: "key in (\(keys.joined(separator: ", ")))")
+        let issues = try await searchByCategory("key in (\(keys.joined(separator: ", ")))", categories: [.done, .inProgress, .toDo])
         return Dictionary(issues.map { ($0.key, $0.statusCategory) }, uniquingKeysWith: { first, _ in first })
     }
 
@@ -52,6 +59,19 @@ public actor MCPJiraClient: JiraSearching {
     }
 
     // MARK: - Search
+
+    /// One search per category, each ticket given the category of the search that found it.
+    private func searchByCategory(_ jql: String, categories: [JiraIssue.StatusCategory]) async throws(JiraError) -> [JiraIssue] {
+        var found: [JiraIssue] = []
+        var seen = Set<String>()
+        for (category, clause) in Self.categoryQueries where categories.contains(category) {
+            for var issue in try await search(jql: "\(jql) AND \(clause)") where seen.insert(issue.key).inserted {
+                issue.statusCategory = category
+                found.append(issue)
+            }
+        }
+        return found
+    }
 
     private func search(jql: String) async throws(JiraError) -> [JiraIssue] {
         let cloud = try await resolveCloudID()

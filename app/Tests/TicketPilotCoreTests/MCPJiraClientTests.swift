@@ -93,7 +93,10 @@ struct MCPJiraClientTests {
     }
 
     @Test func test_searchesTheSiteCloudWithTheSpecQuery() async throws {
-        let tools = standard()
+        let tools = standard { arguments in
+            let toDo = arguments["jql"] == "assignee = currentUser() AND statusCategory not in (3, 4)"
+            return text(MCPJiraFixtures.page(toDo ? [MCPJiraFixtures.issue("ABC-1")] : []))
+        }
         let jira = MCPJiraClient(site: Self.site, tools: tools)
         let issues = try await jira.openAssignedIssues()
 
@@ -101,10 +104,15 @@ struct MCPJiraClientTests {
             key: "ABC-1", summary: "Summary ABC-1", statusName: "To Start", statusCategory: .toDo,
             labels: ["ios", "fast"], components: ["iOS"]
         )])
-        #expect(tools.calls.map(\.name) == ["getAccessibleAtlassianResources", "searchJiraIssuesUsingJql"])
+        #expect(tools.calls.map(\.name) == [
+            "getAccessibleAtlassianResources", "searchJiraIssuesUsingJql", "searchJiraIssuesUsingJql",
+        ])
+        #expect(tools.calls[1...].map { $0.arguments["jql"] } == [
+            "assignee = currentUser() AND statusCategory = 4",
+            "assignee = currentUser() AND statusCategory not in (3, 4)",
+        ])
         let arguments = tools.calls[1].arguments
         #expect(arguments["cloudId"] == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
-        #expect(arguments["jql"] == "assignee = currentUser() AND statusCategory != Done")
         #expect(arguments["fields"] == ["summary", "status", "labels", "components"])
         #expect(arguments["maxResults"] == 100)
         #expect(arguments["nextPageToken"] == nil)
@@ -129,14 +137,39 @@ struct MCPJiraClientTests {
         #expect(try await jira.openAssignedIssues().map(\.key) == ["ABC-1", "ABC-2"])
     }
 
+    /// The v2 endpoint gives only the category's translated name ("En cours"): the category comes from the
+    /// search that found the ticket, by category id, whatever the site's language.
+    @Test func test_categoriesComeFromTheSearchNotTheTranslatedName() async throws {
+        let tools = standard { arguments in
+            let shown = #"{"key":"%@","fields":{"summary":"S","status":{"name":"%@","statusCategory":{"name":"%@"}}}}"#
+            func issue(_ key: String, _ status: String, _ category: String) -> String {
+                String(format: shown, key, status, category)
+            }
+            return switch arguments["jql"] {
+            case "assignee = currentUser() AND statusCategory = 4": text(MCPJiraFixtures.page([issue("ABC-1", "To Deliver", "En cours")]))
+            case "assignee = currentUser() AND statusCategory not in (3, 4)": text(MCPJiraFixtures.page([issue("ABC-2", "Backlog", "A faire")]))
+            default: text(MCPJiraFixtures.page([]))
+            }
+        }
+        let issues = try await MCPJiraClient(site: Self.site, tools: tools).openAssignedIssues()
+        #expect(issues.map(\.key) == ["ABC-1", "ABC-2"])
+        #expect(issues.map(\.statusCategory) == [.inProgress, .toDo])
+        #expect(issues.map(\.statusName) == ["To Deliver", "Backlog"])
+    }
+
     @Test func test_mapsStatusCategories() async throws {
         let tools = standard { arguments in
-            #expect(arguments["jql"] == "key in (ABC-1, ABC-2, ABC-3)")
-            return text(MCPJiraFixtures.page([
-                MCPJiraFixtures.issue("ABC-1", category: "done", categoryName: "Done"),
-                MCPJiraFixtures.issue("ABC-2", category: "indeterminate", categoryName: "In Progress"),
-                MCPJiraFixtures.issue("ABC-3", category: "undefined", categoryName: "No Category"),
-            ]))
+            switch arguments["jql"] {
+            case "key in (ABC-1, ABC-2, ABC-3) AND statusCategory = 3":
+                return text(MCPJiraFixtures.page([MCPJiraFixtures.issue("ABC-1", category: "done", categoryName: "Done")]))
+            case "key in (ABC-1, ABC-2, ABC-3) AND statusCategory = 4":
+                return text(MCPJiraFixtures.page([MCPJiraFixtures.issue("ABC-2")]))
+            case "key in (ABC-1, ABC-2, ABC-3) AND statusCategory not in (3, 4)":
+                return text(MCPJiraFixtures.page([MCPJiraFixtures.issue("ABC-3")]))
+            default:
+                Issue.record("unexpected query \(String(describing: arguments["jql"]))")
+                return text(MCPJiraFixtures.page([]))
+            }
         }
         let jira = MCPJiraClient(site: Self.site, tools: tools)
         let categories = try await jira.statusCategories(of: ["ABC-1", "ABC-2", "ABC-3"])
@@ -187,8 +220,8 @@ struct MCPJiraClientTests {
         _ = try await jira.openAssignedIssues()
         let arguments = tools.calls[1].arguments
         #expect(Set(arguments.keys) == ["cloud_id", "jql"])
-        // Without a page token argument, one page is all it can read.
-        #expect(tools.calls.count == 2)
+        // Without a page token argument, one page per category is all it can read.
+        #expect(tools.calls.count == 3)
     }
 
     @Test func test_onlyTheExactReadToolsAreUsed() async throws {
@@ -201,7 +234,9 @@ struct MCPJiraClientTests {
         }
         let jira = MCPJiraClient(site: Self.site, tools: tools)
         _ = try await jira.openAssignedIssues()
-        #expect(tools.calls.map(\.name) == ["getAccessibleAtlassianResources", "searchJiraIssuesUsingJql"])
+        #expect(tools.calls.map(\.name) == [
+            "getAccessibleAtlassianResources", "searchJiraIssuesUsingJql", "searchJiraIssuesUsingJql",
+        ])
         #expect(tools.calls[1].arguments["cloudId"] != nil)
     }
 

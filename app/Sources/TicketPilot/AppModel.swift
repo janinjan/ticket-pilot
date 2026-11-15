@@ -221,7 +221,6 @@ final class AppModel {
             }
             return
         }
-        let runner = runner
         let auth = atlassianAuth
         doctorTask = Task { [weak self] in
             let token: Result<String, KeychainError>
@@ -708,19 +707,22 @@ final class AppModel {
     /// Follows `SessionAction.forOpening`: reopen an ended session, start a missing one, or bring the
     /// terminal to the front for a live one. With Ghostty, which is scriptable, the session's own tab is
     /// focused instead, and a session with no tab is resumed in a new one.
+    /// The card's session button: for a finished run with a saved report ("Read the report"), the report.
     func openSession(runID: String) {
-        afterTerminalResolved { [self] in openSessionNow(runID: runID) }
+        afterTerminalResolved { [self] in openSessionNow(runID: runID, showingReport: true) }
     }
 
-    private func openSessionNow(runID: String) {
+    /// The conversation itself, even for a finished run ("Open the session", in the card's menu).
+    func openConversation(runID: String) {
+        afterTerminalResolved { [self] in openSessionNow(runID: runID, showingReport: false) }
+    }
+
+    private func openSessionNow(runID: String, showingReport: Bool) {
         acknowledgeIfDone(runID)
         guard let run = runs.first(where: { $0.id == runID }) else { return }
         let report = RunReport.file(runID: run.id, runsDirectory: paths.runsDirectory)
-        if RunReport.opensFile(
-            run: run,
-            reportSavedAt: RunReport.modified(report),
-            sessionActiveAt: RunReport.sessionActiveAt(sessionID: run.sessionID)
-        ), let text = try? String(contentsOf: report, encoding: .utf8) {
+        if showingReport, RunReport.opensFile(run: run, reportSavedAt: RunReport.modified(report)),
+           let text = try? String(contentsOf: report, encoding: .utf8) {
             reportWindows.show(runID: run.id, key: run.key, report: text)
             return
         }
@@ -1094,9 +1096,11 @@ final class AppModel {
         guard let config else { return }
         let runner = untimedRunner
         let added = config.repos.map(\.path)
+        // Opened now, on the click: a window opened once the search is over would stay behind the others.
+        addRepositoriesWindow.showSearching(folder: folder)
         Task { [weak self] in
             let found = await Task.detached { RepoDetector.scan(folder: folder, runner: runner, excluding: added) }.value
-            guard let self, let config = self.config else { return }
+            guard let self, let config = self.config, addRepositoriesWindow.isOpen else { return }
             addRepositoriesWindow.show(
                 folder: folder, proposals: found, existing: config.repos.map(\.name),
                 existingPlatforms: Set(config.repos.compactMap(RepoName.platform(of:))),

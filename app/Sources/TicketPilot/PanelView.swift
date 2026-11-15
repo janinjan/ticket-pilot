@@ -252,8 +252,14 @@ struct PanelView: View {
         let editor = model.editors[line.runID]
         let finderTitle = model.showInFinderTitle(runID: line.runID)
         let releasable = model.releasable.contains(line.runID)
-        if editor != nil || finderTitle != nil || releasable {
+        // "Read the report" shows the report: the conversation of a finished run is opened from here.
+        let opensConversation = line.section == .reportReady
+        if editor != nil || finderTitle != nil || releasable || opensConversation {
             Menu {
+                if opensConversation {
+                    Button("Open the session", action: closing { model.openConversation(runID: line.runID) })
+                        .accessibilityLabel("Open the session of \(line.name)")
+                }
                 if let editor {
                     Button("Open in \(editor.app)", action: closing { model.openInEditor(runID: line.runID) })
                         .accessibilityLabel("Open \(line.name) in \(editor.app)")

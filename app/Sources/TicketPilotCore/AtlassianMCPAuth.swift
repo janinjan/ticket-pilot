@@ -379,7 +379,14 @@ public struct MCPDiscovery: Equatable, Sendable {
 /// OAuth 2.1 for the Atlassian Remote MCP server, as the MCP authorization spec describes it: discovery,
 /// dynamic client registration of a public loopback client, authorization code with PKCE S256, refresh.
 public actor AtlassianMCPAuth {
-    public static let defaultServer = URL(string: "https://mcp.atlassian.com/v1/mcp")!
+    public static let defaultServer = URL(string: "https://mcp.atlassian.com/v2/mcp")!
+
+    /// The hosts a server may hand the sign-in to: its own, and for Atlassian's MCP server the Atlassian
+    /// sign-in host its v2 endpoint names (`auth.atlassian.com`). Any other one is refused.
+    static func authorizationHosts(for server: URL) -> Set<String> {
+        guard let host = server.host?.lowercased() else { return [] }
+        return host == "mcp.atlassian.com" ? [host, "auth.atlassian.com"] : [host]
+    }
 
     public nonisolated let server: URL
     private let store: MCPCredentialStoring
@@ -405,7 +412,7 @@ public actor AtlassianMCPAuth {
         self.server = server
         self.store = store
         self.transport = transport
-        self.allowedAuthorizationHosts = allowedAuthorizationHosts ?? Set([server.host?.lowercased()].compactMap { $0 })
+        self.allowedAuthorizationHosts = allowedAuthorizationHosts ?? Self.authorizationHosts(for: server)
         self.now = now
     }
 
