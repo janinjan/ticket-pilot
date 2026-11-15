@@ -13,22 +13,24 @@ public enum JiraAuth: String, Decodable, Equatable, Sendable {
 }
 
 public struct JiraSettings: Decodable, Sendable {
+    /// The Keychain entry of the Jira API token, used with `jira.auth` `api_token` and by the skill's REST
+    /// fallback. An old config's `keychain_service` is ignored.
+    public static let tokenKeychainService = "ticket-pilot-jira"
+
     public var site: URL
-    public var email: String
-    public var keychainService: String
+    /// Nil when the Atlassian sign-in did not tell it; only the API token connection needs it.
+    public var email: String?
     /// `mcp` when absent.
     public var auth: JiraAuth
 
     private enum CodingKeys: String, CodingKey {
         case site, email, auth
-        case keychainService = "keychain_service"
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         site = try container.decode(URL.self, forKey: .site)
-        email = try container.decode(String.self, forKey: .email)
-        keychainService = try container.decode(String.self, forKey: .keychainService)
+        email = try container.decodeIfPresent(String.self, forKey: .email)
         auth = try container.decodeIfPresent(JiraAuth.self, forKey: .auth) ?? .mcp
     }
 }
@@ -61,7 +63,8 @@ public struct RepoConfig: Decodable, Sendable, Hashable {
     public var name: String
     public var path: String
     public var mainBranch: String
-    public var review: String
+    /// `gerrit` or `github`; nil when unknown (the report then gives the branch with no command to send it).
+    public var review: String?
     public var match: MatchRules
     /// The app the menu bar app opens a run's worktree in; else chosen by the project type.
     public var editor: String?
@@ -78,7 +81,7 @@ public struct RepoConfig: Decodable, Sendable, Hashable {
         name = try container.decode(String.self, forKey: .name)
         path = try container.decode(String.self, forKey: .path)
         mainBranch = try container.decode(String.self, forKey: .mainBranch)
-        review = try container.decode(String.self, forKey: .review)
+        review = try container.decodeIfPresent(String.self, forKey: .review)
         match = try container.decodeIfPresent(MatchRules.self, forKey: .match) ?? MatchRules()
         editor = try container.decodeIfPresent(String.self, forKey: .editor)
         guidelines = try container.decodeIfPresent([String].self, forKey: .guidelines) ?? []

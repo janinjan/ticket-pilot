@@ -80,4 +80,21 @@ import Testing
             headline: "Waiting for Atlassian sign-in…", subtitle: "Finish signing in in your browser.", needsSetup: true
         ))
     }
+
+    /// Settings shows the platform of each repo, read from its name or, for a second checkout named after
+    /// its folder, from its match rules; and the review kind as written by people.
+    @Test func test_aRepoSummaryNamesItsPlatformBranchAndReview() throws {
+        func repo(_ json: String) throws -> RepoConfig {
+            try JSONDecoder().decode(RepoConfig.self, from: Data(json.utf8))
+        }
+        let ios = try repo(#"{"name":"ios","path":"/r/app","main_branch":"master","review":"gerrit"}"#)
+        #expect(RepoName.summary(of: ios) == "iOS · master · Gerrit")
+        let kmp = try repo(#"{"name":"kmp","path":"/r/kmp","main_branch":"master","review":"gerrit","match":{"title_prefixes":["[Android]","[AND]"]}}"#)
+        #expect(RepoName.summary(of: kmp) == "Android · master · Gerrit")
+        let tool = try repo(#"{"name":"go","path":"/r/go","main_branch":"main"}"#)
+        #expect(RepoName.summary(of: tool) == "main")
+        let web = try repo(#"{"name":"web-app","path":"/r/web","main_branch":"master","review":"github","match":{"title_prefixes":["[Web]"]}}"#)
+        #expect(RepoName.summary(of: web) == "Web · master · GitHub")
+        #expect([ios, kmp, tool, web].map(RepoName.platform(of:)) == ["ios", "android", nil, "web"])
+    }
 }

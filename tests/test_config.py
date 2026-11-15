@@ -65,6 +65,14 @@ class ConfigTests(unittest.TestCase):
             problems = config.validate(cfg)
         self.assertTrue(any("repos[ios].review" in p for p in problems))
 
+    def test_review_is_optional(self):
+        # The app leaves it out when it cannot tell how a repo is reviewed.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = minimal_repo("ios", tmp)
+            del repo["review"]
+            cfg = config.load(write_json(tmp, {"repos": [repo]}))
+            self.assertEqual(config.validate(cfg), [])
+
     def test_repo_by_name(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = config.load(write_json(tmp, {"repos": [minimal_repo("ios", tmp)]}))

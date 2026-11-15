@@ -22,6 +22,7 @@ struct SettingsView: View {
                 .controlSize(.small)
                 .disabled(!model.configFileExists)
             }
+            RepositoriesSection(model: model)
             Section {
                 Toggle("Open at login", isOn: $model.openAtLogin)
                     .disabled(!model.hasBundle)
@@ -69,7 +70,7 @@ struct SettingsView: View {
                     CheckRow(
                         ok: check.ok,
                         title: check.id.title,
-                        detail: check.lines.isEmpty ? check.detail : check.lines.joined(separator: "\n"),
+                        detail: check.detail,
                         fix: check.fix
                     ) {
                         if check.id == .jiraToken, !check.ok, check.needsToken {
@@ -170,7 +171,49 @@ private struct JiraSection: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
-        .disabled(model.configError != nil)
+        // Without a config the sign-in is what creates it: only a broken file disables the section.
+        .disabled(model.configIsBroken)
+    }
+}
+
+/// The repositories of the config: one row each, with a remove button, and "Add a repository…".
+private struct RepositoriesSection: View {
+    let model: AppModel
+
+    var body: some View {
+        Section {
+            ForEach(model.repositories, id: \.name) { repo in
+                let path = (repo.path as NSString).abbreviatingWithTildeInPath
+                HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(URL(fileURLWithPath: repo.path).lastPathComponent)
+                        Text(RepoName.summary(of: repo))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .help(path)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityHint(path)
+                    Spacer(minLength: 8)
+                    Button {
+                        model.removeRepository(named: repo.name)
+                    } label: {
+                        Image(systemName: "minus.circle")
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Remove \(RepoName.display(repo.name))")
+                }
+            }
+            Button("Add repositories…", action: model.addRepository)
+                .controlSize(.small)
+                .disabled(model.configError != nil)
+        } header: {
+            Text("Repositories")
+        } footer: {
+            Text("The checkouts TicketPilot works in. Removing one never touches its folder.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 }
 

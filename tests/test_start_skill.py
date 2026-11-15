@@ -112,6 +112,15 @@ class StartSkillTests(unittest.TestCase):
         self.assertIn("--jira-line", text)
         self.assertIn("JIRA: <KEY>", step_sections(text)[9])
 
+    def test_worked_out_settings_are_saved_only_on_a_yes_at_the_end(self):
+        text = skill()
+        self.assertIn("**Settings worked out.**", text)
+        report = step_sections(text)[10]
+        self.assertIn('bin/tp" config-set', report)
+        self.assertIn("run-wait <id> question", report)
+        self.assertLess(report.index('bin/tp" config-set'), report.index("run-done"))
+        self.assertIn("Never save one during the run", text)
+
     def test_run_is_done_at_the_end(self):
         self.assertRegex(step_sections(skill())[10], r'tp"? run-done <id>')
 

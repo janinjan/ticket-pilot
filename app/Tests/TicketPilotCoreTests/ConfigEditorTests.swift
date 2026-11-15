@@ -132,4 +132,91 @@ import Testing
         #expect(throws: ConfigEditError.notAnObject) { try Self.editAuth("mcp", in: #"{"jira": 1}"#) }
         #expect(throws: ConfigEditError.notAnObject) { try Self.editAuth("mcp", in: #"{"repos": []}"#) }
     }
+
+    // MARK: - Guided setup
+
+    static func string(_ data: Data) -> String { String(decoding: data, as: UTF8.self) }
+
+    @Test func test_fillJiraCreatesAConfig() throws {
+        let data = try ConfigEditor.fillJira(site: URL(string: "https://acme.atlassian.net")!, email: "me@acme.com", in: nil)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("tp-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try data.write(to: url)
+        let config = try AppConfig.load(from: url)
+        #expect(config.jira.site == URL(string: "https://acme.atlassian.net")!)
+        #expect(config.jira.email == "me@acme.com")
+        #expect(config.repos.isEmpty)
+    }
+
+    @Test func test_fillJiraKeepsWhatIsWritten() throws {
+        let text = #"{"jira": {"site": "https://mine.atlassian.net", "auth": "api_token"}, "repos": [], "poll_minutes": 2}"#
+        let output = Self.string(try ConfigEditor.fillJira(
+            site: URL(string: "https://acme.atlassian.net")!, email: "me@acme.com", in: Data(text.utf8)
+        ))
+        let jira = try #require(try Self.object(output)["jira"] as? NSDictionary)
+        #expect(jira["site"] as? String == "https://mine.atlassian.net")
+        #expect(jira["email"] as? String == "me@acme.com")
+        #expect(jira["auth"] as? String == "api_token")
+        #expect(try Self.object(output)["poll_minutes"] as? Int == 2)
+    }
+
+    @Test func test_fillJiraWithoutEmailWritesNone() throws {
+        let output = Self.string(try ConfigEditor.fillJira(site: URL(string: "https://acme.atlassian.net")!, email: nil, in: nil))
+        let jira = try #require(try Self.object(output)["jira"] as? NSDictionary)
+        #expect(jira["email"] == nil)
+    }
+
+    static let web = RepoEntry(
+        name: "web", path: "/r/web", mainBranch: "master", review: "github",
+        titlePrefixes: ["[Web]"], labels: ["Web"], components: ["Web"]
+    )
+
+    @Test func test_addRepoAppendsAnEntryAppConfigReads() throws {
+        let output = try ConfigEditor.addRepo(Self.web, in: Data(Self.config.utf8))
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("tp-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try output.write(to: url)
+        let config = try AppConfig.load(from: url)
+        #expect(config.repos.map(\.name) == ["ios", "web"])
+        #expect(config.repos[1].path == "/r/web")
+        #expect(config.repos[1].mainBranch == "master")
+        #expect(config.repos[1].review == "github")
+        #expect(config.repos[1].match.titlePrefixes == ["[Web]"])
+        #expect(config.repos[1].match.components == ["Web"])
+        #expect(try Self.object(Self.string(output))["terminal_app"] as? String == "Terminal")
+    }
+
+    /// The file stays readable by hand: `/` is written as is, not as `\/`.
+    @Test func test_pathsAreWrittenWithoutEscapedSlashes() throws {
+        let output = Self.string(try ConfigEditor.addRepo(Self.web, in: Data(Self.config.utf8)))
+        #expect(output.contains(#""path": "/r/web""#))
+        let jira = Self.string(try ConfigEditor.fillJira(site: URL(string: "https://acme.atlassian.net")!, email: nil, in: nil))
+        #expect(jira.contains(#""site": "https://acme.atlassian.net""#))
+    }
+
+    @Test func test_addRepoWithoutReviewWritesNone() throws {
+        var entry = Self.web
+        entry.review = nil
+        let output = try ConfigEditor.addRepo(entry, in: Data(Self.config.utf8))
+        let repos = try #require(try Self.object(Self.string(output))["repos"] as? [NSDictionary])
+        #expect(repos[1]["review"] == nil)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("tp-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try output.write(to: url)
+        #expect(try AppConfig.load(from: url).repos[1].review == nil)
+    }
+
+    @Test func test_addRepoCreatesTheListWhenAbsent() throws {
+        let output = try ConfigEditor.addRepo(Self.web, in: Data(#"{"jira": {}}"#.utf8))
+        let repos = try #require(try Self.object(Self.string(output))["repos"] as? [NSDictionary])
+        #expect(repos.map { $0["name"] as? String } == ["web"])
+    }
+
+    @Test func test_removeRepoKeepsTheOthers() throws {
+        let two = try ConfigEditor.addRepo(Self.web, in: Data(Self.config.utf8))
+        let output = Self.string(try ConfigEditor.removeRepo(named: "ios", in: two))
+        let repos = try #require(try Self.object(output)["repos"] as? [NSDictionary])
+        #expect(repos.map { $0["name"] as? String } == ["web"])
+        #expect(try Self.object(output)["max_commit_lines"] as? Int == 999)
+    }
 }

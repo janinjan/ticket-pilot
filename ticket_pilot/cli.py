@@ -200,12 +200,28 @@ def cmd_commit_size(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_config_set(args: argparse.Namespace) -> int:
+    problems = config.set_value(args.key, args.value, repo_name=args.repo)
+    if problems:
+        for problem in problems:
+            print(problem)
+        return 2
+    print("saved %s%s" % (args.key, " for %s" % args.repo if args.repo else ""))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tp")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     check = subparsers.add_parser("config-check", help="validate the local config")
     check.set_defaults(func=cmd_config_check)
+
+    setting = subparsers.add_parser("config-set", help="save a setting a run worked out, every other key kept")
+    setting.add_argument("--repo", help="the repo entry to set it on; else the top level")
+    setting.add_argument("key")
+    setting.add_argument("value")
+    setting.set_defaults(func=cmd_config_set)
 
     start = subparsers.add_parser("run-start", help="create a run (idempotent)")
     start.add_argument("key")

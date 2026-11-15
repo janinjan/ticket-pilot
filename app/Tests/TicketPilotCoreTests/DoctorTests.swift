@@ -72,7 +72,7 @@ private struct TokenError: Error {}
             return #"{"name":"\#($0)","path":"\#(fixture.repoPaths[$0]!)","main_branch":"main","review":"none"\#(guidelines)}"#
         }
         let json = """
-        {"jira":{"site":"https://example.atlassian.net","email":"me@example.com","keychain_service":"tp-test",\
+        {"jira":{"site":"https://example.atlassian.net","email":"me@example.com",\
         "auth":"\(auth)"},
          "repos":[\(repos.joined(separator: ","))]}
         """
@@ -118,6 +118,24 @@ private struct TokenError: Error {}
         #expect(plugin.pluginState == .current)
     }
 
+    @Test func withoutAConfigOnlyTheChecksThatNeedNoneRun() async throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.home) }
+        let doctor = Doctor(
+            config: nil,
+            home: fixture.home,
+            runner: MCPRunner(output: "atlassian: https://x - ✓ Connected\n"),
+            jira: nil,
+            tokenLookup: { throw KeychainError.notFound },
+            freeBytes: { 100_000_000_000 },
+            claudeSearchPaths: [fixture.claude],
+            bundledPluginManifest: fixture.bundledManifest
+        )
+        let checks = await doctor.run()
+        #expect(checks.map(\.id) == [.claudeCLI, .plugin, .mcp, .diskSpace])
+        #expect(try check(checks, .plugin).pluginState == .current)
+    }
+
     @Test func missingClaudeBlocksEveryStart() async throws {
         let fixture = try makeFixture(claude: false)
         defer { try? FileManager.default.removeItem(at: fixture.home) }
@@ -159,15 +177,16 @@ private struct TokenError: Error {}
         #expect(checks.canStart(repo: "web"))
     }
 
-    @Test func reposCheckListsEachRepo() async throws {
-        let fixture = try makeFixture(existingRepos: false)
-        defer { try? FileManager.default.removeItem(at: fixture.home) }
-        let checks = await (try makeDoctor(fixture, webGuidelines: "~/guidelines/docs")).run()
-        let repos = try check(checks, .repoPaths)
-        #expect(repos.lines == [
-            "iOS · \(fixture.repoPaths["ios"]!) · main (not found)",
-            "Web · \(fixture.repoPaths["web"]!) · main · guidelines: ~/guidelines/docs",
-        ])
+    /// Settings › Repositories lists each repo: Diagnostics only says whether their folders are there.
+    @Test func reposCheckCountsTheReposOrNamesTheMissingOnes() async throws {
+        let present = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: present.home) }
+        let found = try check(await (try makeDoctor(present)).run(), .repoPaths)
+        #expect(found.detail == "2 repositories found")
+        let absent = try makeFixture(existingRepos: false)
+        defer { try? FileManager.default.removeItem(at: absent.home) }
+        let missing = try check(await (try makeDoctor(absent)).run(), .repoPaths)
+        #expect(missing.detail == "Path not found for: ios")
     }
 
     @Test func newerPluginThanBundledIsFine() async throws {
@@ -204,8 +223,8 @@ private struct TokenError: Error {}
         #expect(!token.ok)
         #expect(token.blocksStart)
         let fix = try #require(token.fix)
-        #expect(fix.contains("tp-test"))
-        #expect(token.fix == #"security add-generic-password -s "tp-test" -a "$USER" -w"#)
+        #expect(fix.contains("ticket-pilot-jira"))
+        #expect(token.fix == #"security add-generic-password -s "ticket-pilot-jira" -a "$USER" -w"#)
         let reachable = try check(checks, .jiraReachable)
         #expect(!reachable.ok)
         #expect(!reachable.blocksStart)

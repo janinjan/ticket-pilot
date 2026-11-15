@@ -264,6 +264,27 @@ public enum RunTitle {
 /// How a repo is named in the panel.
 public enum RepoName {
     /// The platform names spelled as they are ("ios" reads "iOS"); any other name as is.
+    /// The line under a repo in Settings: its platform (from its name, else its match rules), main branch
+    /// and review kind ("Android · delivery · Gerrit").
+    public static func summary(of repo: RepoConfig) -> String {
+        let platform = platform(of: repo).map(display)
+        let review: String? = switch repo.review {
+        case "gerrit": "Gerrit"
+        case "github": "GitHub"
+        default: repo.review
+        }
+        return [platform, repo.mainBranch, review].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    /// `ios`, `android` or `web`: from the repo's name, else from its match title prefixes (a second
+    /// checkout named after its folder); nil for any other repo.
+    public static func platform(of repo: RepoConfig) -> String? {
+        let name = repo.name.lowercased()
+        if ["ios", "android", "web"].contains(name) { return name }
+        return [("[iOS]", "ios"), ("[Android]", "android"), ("[Web]", "web")]
+            .first { tag, _ in repo.match.titlePrefixes.contains { $0.caseInsensitiveCompare(tag) == .orderedSame } }?.1
+    }
+
     public static func display(_ name: String) -> String {
         switch name.lowercased() {
         case "ios": "iOS"

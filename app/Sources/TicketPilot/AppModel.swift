@@ -18,6 +18,8 @@ final class AppModel {
     /// The runs that can be released: finished, or with their ticket Done in Jira.
     var releasable: Set<String> { Releasable.runIDs(runs: runs, categories: ticketCategories) }
     private(set) var configError: String?
+    /// Why the config can't be used yet, for the setup banner: none, broken, or the example as is.
+    private(set) var configProblem: SetupProblem.ConfigProblem?
     private(set) var openAtLoginState = false
     /// Disk usage of each run's worktree, by run id.
     private(set) var diskUsage: [String: Int64] = [:]
@@ -72,8 +74,27 @@ final class AppModel {
 
     /// The problem the panel offers to fix, if any.
     var setupProblem: SetupProblem? {
-        SetupProblem.first(in: health, configError: configError, jiraFailing: jiraFailing)
+        let problem = SetupProblem.first(in: health, config: configProblem, jiraFailing: jiraFailing)
+        // Signed in, but to an account with no Jira site: connecting again would change nothing.
+        if noJiraSite, configProblem == .missing, problem?.action == .connectAtlassian { return SetupProblem.noJiraSite }
+        return problem
     }
+
+    /// The signed-in Atlassian account can open no Jira site, so no config could be written.
+    private(set) var noJiraSite = false
+    /// Reading the account to write the Jira site and email, after a sign-in.
+    @ObservationIgnored private var settingUpJira = false
+    /// Whether this launch (or the last sign-in) already tried to write the config from a stored sign-in.
+    @ObservationIgnored private var jiraSetupTried = false
+
+    /// A config that exists but does not load: what depends on it in Settings waits for the fix.
+    var configIsBroken: Bool {
+        if case .invalid = configProblem { true } else { false }
+    }
+
+    /// The repositories of the config, for Settings: observed, unlike `config`, so the list follows each
+    /// edit.
+    private(set) var repositories: [RepoConfig] = []
 
     /// The setup button: "Copied ✓" for a few seconds once its fix command is copied.
     var setupProblemTitle: String? {
@@ -116,6 +137,7 @@ final class AppModel {
     @ObservationIgnored private let untimedRunner = SystemProcessRunner()
     @ObservationIgnored private let sleepGuard = SleepGuard()
     @ObservationIgnored private let picker = RepoPickerWindow()
+    @ObservationIgnored private let addRepositoriesWindow = AddRepositoriesWindow()
     @ObservationIgnored private let settingsWindow = AuxiliaryWindow()
     @ObservationIgnored private let aboutWindow = AuxiliaryWindow()
     @ObservationIgnored private let reportWindows = ReportWindows()
@@ -181,16 +203,28 @@ final class AppModel {
     func runDoctor() {
         doctorTask?.cancel()
         loadConfig()
-        guard let config else {
+        checkingSetup = true
+        // Without a config, or with a broken one, Jira is not read: Claude Code and the plugin are still
+        // checked, so a first launch starts with them. Without a config, a stored sign-in writes it.
+        guard let config, !configIsBroken else {
             poller?.stop()
             jiraFailing = true
-            health = []
-            checkingSetup = false
+            if configProblem == .missing, !jiraSetupTried {
+                jiraSetupTried = true
+                completeJiraSetup(signInIfNeeded: false)
+            }
+            let doctor = makeDoctor(config: nil, jira: nil, tokenLookup: { throw KeychainError.notFound })
+            doctorTask = Task { [weak self] in
+                let checks = await Task.detached { await doctor.run() }.value
+                guard !Task.isCancelled, let self else { return }
+                health = checks
+                checkingSetup = false
+                lastSetupCheck = Date()
+            }
             return
         }
-        checkingSetup = true
         jiraAuth = config.jira.auth
-        let service = config.jira.keychainService
+        let service = JiraSettings.tokenKeychainService
         let runner = runner
         let auth = atlassianAuth
         doctorTask = Task { [weak self] in
@@ -206,7 +240,7 @@ final class AppModel {
                         Result<String, KeychainError> { () throws(KeychainError) in try Keychain.password(service: service) }
                     }.value
                     jira = (try? token.get()).map {
-                        JiraClient(site: config.jira.site, email: config.jira.email, token: $0)
+                        JiraClient(site: config.jira.site, email: config.jira.email ?? "", token: $0)
                     }
                 case .mcp:
                     token = await Self.atlassianSignIn(auth)
@@ -224,15 +258,7 @@ final class AppModel {
                 poller?.stop()
                 jiraFailing = true
             }
-            let doctor = Doctor(
-                config: config,
-                home: FileManager.default.homeDirectoryForCurrentUser,
-                runner: runner,
-                jira: jira,
-                tokenLookup: { try token.get() },
-                freeBytes: freeBytesOnHomeVolume,
-                bundledPluginManifest: Doctor.bundledPluginManifest(resources: Bundle.main.resourceURL)
-            )
+            let doctor = makeDoctor(config: config, jira: jira, tokenLookup: { try token.get() })
             let checks = await Task.detached { await doctor.run() }.value
             guard !Task.isCancelled else { return }
             health = checks
@@ -244,6 +270,20 @@ final class AppModel {
                 jiraAccount = email
             }
         }
+    }
+
+    private func makeDoctor(
+        config: AppConfig?, jira: (any JiraSearching)?, tokenLookup: @escaping @Sendable () throws -> String
+    ) -> Doctor {
+        Doctor(
+            config: config,
+            home: FileManager.default.homeDirectoryForCurrentUser,
+            runner: runner,
+            jira: jira,
+            tokenLookup: tokenLookup,
+            freeBytes: freeBytesOnHomeVolume,
+            bundledPluginManifest: Doctor.bundledPluginManifest(resources: Bundle.main.resourceURL)
+        )
     }
 
     private static var version: String {
@@ -320,6 +360,8 @@ final class AppModel {
         do {
             config = try AppConfig.load(from: paths.configFile)
             configError = nil
+            configProblem = config?.repos.isEmpty == true ? .noRepos : nil
+            repositories = config?.repos ?? []
             configuredTerminal = config?.terminalApp
             resolveTerminal(configured: config?.terminalApp)
             // Runs are read before the config at launch: what depends on it is derived again.
@@ -339,6 +381,11 @@ final class AppModel {
             case let .missing(path): "not found at \(path)"
             case let .invalid(message): message
             }
+            configProblem = switch error {
+            case .missing: .missing
+            case let .invalid(message): .invalid(message)
+            }
+            repositories = []
             updatePresentation()
         }
     }
@@ -548,6 +595,9 @@ final class AppModel {
     /// The panel opened: counts again the runs whose `origin/<main>` moved since their last count.
     func panelOpened() {
         countCommits()
+        // The config is not watched: while it can't be used, each opening reads it again, so the banner moves
+        // on once the user saved it.
+        if configProblem != nil { runDoctor() }
     }
 
     /// Measures the worktree of each finished run off the main actor, again only when its run file changed.
@@ -972,10 +1022,145 @@ final class AppModel {
         case let .openURL(url): NSWorkspace.shared.open(url)
         case let .copyFix(check): copyFix(of: check)
         case .setJiraToken: setJiraToken()
-        case .connectAtlassian: connectAtlassian()
+        case .connectAtlassian:
+            if configProblem == .missing { completeJiraSetup(signInIfNeeded: true) } else { connectAtlassian() }
         case let .explain(text): Alerts.show(text)
         case .checkAgain: runDoctor()
         case let .installPlugin(state): installPlugin(state)
+        case .addRepository: addRepository()
+        }
+    }
+
+    // MARK: - Guided setup
+
+    /// With a stored Atlassian sign-in: reads the account and writes `jira.site` and `jira.email` where they
+    /// are missing (creating the config), asking which site when the account has several. Without one,
+    /// opens the sign-in when `signInIfNeeded` (a click), else does nothing (a launch).
+    private func completeJiraSetup(signInIfNeeded: Bool) {
+        guard !settingUpJira else { return }
+        settingUpJira = true
+        let auth = atlassianAuth
+        Task { [weak self] in
+            let connected = (try? await auth.isConnected()) == true
+            var account: Result<AtlassianAccount, JiraError>?
+            if connected {
+                do throws(JiraError) {
+                    account = .success(try await MCPJiraClient.account(
+                        tools: MCPClient(url: auth.server, tokens: auth, clientVersion: Self.version)
+                    ))
+                } catch {
+                    account = .failure(error)
+                }
+            }
+            guard let self else { return }
+            settingUpJira = false
+            hasAtlassianSignIn = connected
+            switch account {
+            case nil:
+                if signInIfNeeded { connectAtlassian() }
+            case let .failure(error):
+                Alerts.show(AlertText(title: "Jira was not set up", message: "\(error)"))
+            case let .success(account):
+                let site: URL
+                switch account.siteChoice {
+                case .noSite:
+                    noJiraSite = true
+                    return
+                case let .only(only):
+                    site = only
+                case let .ask(sites):
+                    guard let chosen = Alerts.chooseSite(sites) else { return }
+                    site = chosen
+                }
+                noJiraSite = false
+                if writeJira(site: site, email: account.email) { runDoctor() }
+            }
+        }
+    }
+
+    /// Fills the Jira site and email of the config, creating the file (and its folder) when there is none.
+    private func writeJira(site: URL, email: String?) -> Bool {
+        let file = paths.configFile.resolvingSymlinksInPath()
+        do {
+            let existing = FileManager.default.fileExists(atPath: file.path) ? try Data(contentsOf: file) : nil
+            let data = try ConfigEditor.fillJira(site: site, email: email, in: existing)
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try data.write(to: file, options: .atomic)
+            return true
+        } catch {
+            Alerts.show(AlertText(title: "The config was not saved", message: error.localizedDescription))
+            return false
+        }
+    }
+
+    /// Lists the checkouts of the folder that holds the repos (the one of the repos already added, else
+    /// ~/Developer, else one the user picks), to tick and add together.
+    func addRepository() {
+        guard let folder = defaultReposFolder() ?? pickReposFolder() else { return }
+        addRepositories(in: folder)
+    }
+
+    private func addRepositories(in folder: URL) {
+        guard let config else { return }
+        let runner = untimedRunner
+        let added = config.repos.map(\.path)
+        Task { [weak self] in
+            let found = await Task.detached { RepoDetector.scan(folder: folder, runner: runner, excluding: added) }.value
+            guard let self, let config = self.config else { return }
+            addRepositoriesWindow.show(
+                folder: folder, proposals: found, existing: config.repos.map(\.name),
+                existingPlatforms: Set(config.repos.compactMap(RepoName.platform(of:))),
+                onAdd: { [weak self] entries in self?.add(entries) },
+                onOtherFolder: { [weak self] in
+                    guard let self, let other = pickReposFolder() else { return }
+                    addRepositories(in: other)
+                }
+            )
+        }
+    }
+
+    private func add(_ entries: [RepoEntry]) {
+        let saved = editConfig(failure: "The repositories were not added") { data in
+            try entries.reduce(data) { data, entry in try ConfigEditor.addRepo(entry, in: data) }
+        }
+        guard saved else { return }
+        addRepositoriesWindow.close()
+        runDoctor()
+    }
+
+    private func defaultReposFolder() -> URL? {
+        if let first = config?.repos.first {
+            let parent = URL(fileURLWithPath: (first.path as NSString).expandingTildeInPath).deletingLastPathComponent()
+            if FileManager.default.fileExists(atPath: parent.path) { return parent }
+        }
+        let developer = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Developer")
+        return FileManager.default.fileExists(atPath: developer.path) ? developer : nil
+    }
+
+    private func pickReposFolder() -> URL? {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+        panel.message = "Choose the folder that holds your repositories, or one repository."
+        NSApp.activate()
+        return panel.runModal() == .OK ? panel.url : nil
+    }
+
+    /// Removes a repository from the config (never its folder); refused while one of its runs is listed.
+    func removeRepository(named name: String) {
+        let display = RepoName.display(name)
+        if runs.contains(where: { $0.repo == name }) {
+            Alerts.show(AlertText(title: "\(display) has runs", message: "Remove its worktrees first."))
+            return
+        }
+        guard Alerts.confirm(
+            AlertText(title: "Remove \(display) from TicketPilot?", message: "Its folder stays on your Mac: only its entry in the config is removed."),
+            button: "Remove"
+        ) else { return }
+        if editConfig(failure: "The repository was not removed", { try ConfigEditor.removeRepo(named: name, in: $0) }) {
+            runDoctor()
         }
     }
 
@@ -1011,7 +1196,8 @@ final class AppModel {
                 Alerts.show(error.alertText)
                 return
             }
-            guard Alerts.confirm(PluginInstaller.confirmation(commands), button: PluginInstaller.confirmButton(commands)) else {
+            let version = Doctor.pluginVersion(manifest: Doctor.bundledPluginManifest(resources: Bundle.main.resourceURL))
+            guard Alerts.confirm(PluginInstaller.confirmation(commands, version: version), button: PluginInstaller.confirmButton(commands)) else {
                 installingPlugin = false
                 return
             }
@@ -1022,15 +1208,8 @@ final class AppModel {
             }.value
             installingPlugin = false
             switch outcome {
-            case let .success(results):
-                let log = results.map { result in
-                    let output = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
-                    return output.isEmpty ? result.command.display : "\(result.command.display)\n\(output)"
-                }
-                Alerts.show(AlertText(
-                    title: "Plugin installed — restart your Claude Code sessions to use it",
-                    message: log.joined(separator: "\n\n")
-                ))
+            case .success:
+                Alerts.show(PluginInstaller.success(commands, version: version))
             case let .failure(error):
                 Alerts.show(error.alertText)
             }
@@ -1075,6 +1254,8 @@ final class AppModel {
                 _ = try await auth.completeSignIn(signIn)
                 guard signInID == id else { return }
                 finishSignIn()
+                hasAtlassianSignIn = true
+                jiraSetupTried = false
                 runDoctor()
             } catch {
                 // A cancelled sign-in was already ended by `cancelSignIn`, or replaced by a newer one.
@@ -1107,6 +1288,8 @@ final class AppModel {
         Task { [weak self] in
             await auth.disconnect()
             self?.jiraAccount = nil
+            self?.noJiraSite = false
+            self?.hasAtlassianSignIn = false
             self?.runDoctor()
         }
     }
@@ -1138,14 +1321,14 @@ final class AppModel {
     /// Asks for the token, stores it in the Keychain and checks the setup again.
     func setJiraToken() {
         guard let config else { return }
-        guard let answer = Alerts.askJiraToken(site: config.jira.site.absoluteString, email: config.jira.email) else {
+        guard let answer = Alerts.askJiraToken(site: config.jira.site.absoluteString, email: config.jira.email ?? "your Atlassian account") else {
             return
         }
         guard let token = answer.nonEmpty else {
             Alerts.show(AlertText(title: "The token is empty", message: "Nothing was saved."))
             return
         }
-        let service = config.jira.keychainService
+        let service = JiraSettings.tokenKeychainService
         let account = NSUserName()
         Task { [weak self] in
             let result = await Task.detached {

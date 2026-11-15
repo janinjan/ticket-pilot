@@ -50,6 +50,8 @@ Each of these makes the run a failure, whatever the result:
 
 **The config.** Read the config file with the Read tool: `$TICKET_PILOT_CONFIG` when set, else `~/.config/ticket-pilot/config.json`. In the steps below, "the repo entry" is the entry of `repos` chosen at start-up. Optional keys, used when present: on the repo entry `setup_command`, `sync_command`, `launch_skill`, `ci_review_prompt` (a path relative to the repo root), `ci_review_command`, `guidelines` (folders or files of team conventions kept outside the repo, `~` allowed); at the top level `sync_command`, `reviewer_agent`, `auditor_agent`, `backend.repos`, `backend.api_docs`, `max_commit_lines`.
 
+**Settings worked out.** When the run works out a setting the repo entry does not have yet, note it with its proof, for the end of the report: `setup_command` (the command that set the worktree up in step 2, found in the repo's README, Makefile or build skill), `launch_skill` (the skill that built and launched the app in step 7), `guidelines` (team conventions found outside the repo, used in steps 3 and 5), `backend.repos` and `backend.api_docs` (the backend checkout or API docs read in step 3, at the top level of the config). Never save one during the run: they are offered once, at the end of step 10. `ci_review_command` keeps its own question, in step 9.
+
 **The user's memory for this repo.** Claude Code loads the user's memory only for the directory the session started in: a session started in the worktree or in another directory does not see the memory of the repo, and a loaded index is not a rule applied. So read it yourself, at start-up and on resume: the folder is `~/.claude/projects/<name>/memory/`, where `<name>` is the main repo root with every non-alphanumeric character replaced by `-` (for example `/home/a.b/dev/app` gives `-home-a-b-dev-app`). Read its `MEMORY.md` and every file it links about code, naming, vocabulary, tests or commits. No such folder → say so once and carry on. Go over these rules again before naming anything (the branch in step 2, every symbol in step 5, every commit subject in step 9) and before splitting the commits: a rule of the memory wins over a default of this skill, for example the order or the grouping of the split.
 
 **The worktree.** Bash `cd` outside the session's working directory may not persist between calls. Every command for the worktree is either `cd "<worktree>" && …` in the same call or `git -C "<worktree>" …`. Every file edit uses an absolute path inside the worktree. Never edit the main checkout. Every build, test, setup, generation or `ci_review_command` command in the worktree goes through `"<plugin-root>/bin/tp" run-shell <id> '<command string>'` (the whole command as ONE quoted string): it runs in the worktree, with the run's `env` from the repo entry, inside the user's login interactive shell (`$SHELL -l -i -c`), so the user's version managers and PATH are loaded; Claude's Bash tool alone does not load them (wrong Ruby or Node, failed generation). Its stdin is empty and its exit code is the command's. Plain `git` commands do not need it. `tp run-env <id>` (export lines) remains for the cases where you need the variables yourself.
@@ -77,7 +79,7 @@ Each of these makes the run a failure, whatever the result:
 
 Run `"<plugin-root>/bin/tp" run-step <id> 1`.
 
-1. Read the whole ticket with the Atlassian MCP tools. Fallback: the Jira REST API with the config's `jira.site` and `jira.email`, and the token from the Keychain entry `jira.keychain_service` (`security find-generic-password -s "<service>" -w`). Never print the token.
+1. Read the whole ticket with the Atlassian MCP tools. Fallback: the Jira REST API with the config's `jira.site` and `jira.email`, and the token from the Keychain entry `ticket-pilot-jira` (`security find-generic-password -s ticket-pilot-jira -w`). Never print the token.
    - description and acceptance criteria;
    - **every comment**: a late comment often changes the scope ("in the end we do X");
    - attachments, linked tickets, the parent epic.
@@ -267,12 +269,17 @@ Write a short report in the user's language, every point with its proof:
 - **decisions taken alone**, open to challenge;
 - every ❓ left.
 
-Save the report, word for word as shown to the user, command to send the branch included, so the menu bar app can open it once the session has moved on: `"<plugin-root>/bin/tp" run-report <id> <<'REPORT'` … `REPORT`. Then run `"<plugin-root>/bin/tp" run-done <id>`.
+Save the report, word for word as shown to the user, command to send the branch included, so the menu bar app can open it once the session has moved on: `"<plugin-root>/bin/tp" run-report <id> <<'REPORT'` … `REPORT`.
+
+When settings were worked out (see Settings worked out), ask once, after the report: `"<plugin-root>/bin/tp" run-wait <id> question "<in the user's language: save these settings for the next tickets on this repo? + one line per setting, key and value + recommendation>"`, and wait. On a yes, save each one with `"<plugin-root>/bin/tp" config-set --repo <repo-name> <key> "<value>"` (`backend.repos` and `backend.api_docs` without `--repo`), then say what was saved; a setting it refuses (it prints why and writes nothing) is reported with its reason. On a no, save nothing.
+
+Then run `"<plugin-root>/bin/tp" run-done <id>`.
 
 End the report with the command the user runs to send the branch, chosen by the repo entry's `review`, printed for the user only (do not run it):
 
 - `review` is `gerrit` → `cd "<worktree>" && git review` (print it, do not run it);
-- `review` is `github` → `cd "<worktree>" && git push -u origin <branch>` then `gh pr create` (print them, do not run them).
+- `review` is `github` → `cd "<worktree>" && git push -u origin <branch>` then `gh pr create` (print them, do not run them);
+- no `review` (the app could not tell how the repo is reviewed) → give the branch and the worktree, with no command: the user sends it the way this repo is reviewed.
 
 ## After the report
 

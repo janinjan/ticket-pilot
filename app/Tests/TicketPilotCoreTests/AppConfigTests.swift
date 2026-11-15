@@ -24,7 +24,27 @@ struct AppConfigTests {
         #expect(config.gitClient == "GitHub Desktop")
         #expect(config.repos[0].editor == "Xcode")
         #expect(config.repos[1].editor == nil)
-        #expect(config.jira.keychainService == "ticket-pilot-jira")
+    }
+
+    @Test func test_keychainServiceIsNoLongerNeeded() throws {
+        let url = try writeTemp("""
+        {"jira":{"site":"https://acme.atlassian.net","email":"a@b.c"},"repos":[]}
+        """)
+        defer { try? FileManager.default.removeItem(at: url) }
+        #expect(try AppConfig.load(from: url).jira.site.host == "acme.atlassian.net")
+        let old = try writeTemp("""
+        {"jira":{"site":"https://acme.atlassian.net","email":"a@b.c","keychain_service":"old"},"repos":[]}
+        """)
+        defer { try? FileManager.default.removeItem(at: old) }
+        #expect(try AppConfig.load(from: old).jira.email == "a@b.c")
+        #expect(JiraSettings.tokenKeychainService == "ticket-pilot-jira")
+    }
+
+    /// The sign-in may not tell the email: a config the app wrote without one still loads.
+    @Test func test_aConfigWithoutEmailLoads() throws {
+        let url = try writeTemp(#"{"jira":{"site":"https://acme.atlassian.net"},"repos":[]}"#)
+        defer { try? FileManager.default.removeItem(at: url) }
+        #expect(try AppConfig.load(from: url).jira.email == nil)
     }
 
     @Test func test_defaultsWhenOptionalKeysAreMissing() throws {

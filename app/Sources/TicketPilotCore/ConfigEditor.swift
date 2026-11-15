@@ -11,6 +11,13 @@ public enum ConfigEditError: Error, Equatable {
 /// every value its spelling (numbers and strings are copied as written). The output is pretty-printed with
 /// two spaces; an array of plain values stays on one line.
 public enum ConfigEditor {
+    /// Writes `/` as is, so that a path or a URL stays readable in the file.
+    private static var encoder: JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .withoutEscapingSlashes
+        return encoder
+    }
+
     /// Sets `terminal_app` to `name`, or removes it when `name` is nil ("Automatic"). A new key goes at
     /// the end of the top-level object; with duplicate keys, the last one (the one readers use) is set and
     /// the others are removed. A byte order mark is dropped.
@@ -26,7 +33,7 @@ public enum ConfigEditor {
         guard case var .object(members) = root else { throw .notAnObject }
         let key = "\"terminal_app\""
         if let name {
-            guard let encoded = try? JSONEncoder().encode(name) else { throw .invalidName }
+            guard let encoded = try? encoder.encode(name) else { throw .invalidName }
             set(key, to: .scalar(String(decoding: encoded, as: UTF8.self)), in: &members)
         } else {
             members.removeAll { $0.key == key }
@@ -49,10 +56,106 @@ public enum ConfigEditor {
               let jiraIndex = members.lastIndex(where: { $0.key == "\"jira\"" }),
               case var .object(jira) = members[jiraIndex].value
         else { throw .notAnObject }
-        guard let encoded = try? JSONEncoder().encode(value) else { throw .invalidName }
+        guard let encoded = try? encoder.encode(value) else { throw .invalidName }
         set("\"auth\"", to: .scalar(String(decoding: encoded, as: UTF8.self)), in: &jira)
         members[jiraIndex].value = .object(jira)
         return Data((render(.object(members), indent: "") + "\n").utf8)
+    }
+
+    /// nil `data`: a new config, `{"jira": {"site", "email"}, "repos": []}`. Else sets only what is missing:
+    /// `jira.site`, `jira.email` (never a value already written), the `jira` object and the `repos` list.
+    /// A nil `email` writes no `email`.
+    public static func fillJira(site: URL, email: String?, in data: Data?) throws(ConfigEditError) -> Data {
+        var members = try data.map { data throws(ConfigEditError) in try topLevel(of: data) } ?? []
+        var jira: [(key: String, value: Value)] = []
+        if let index = members.lastIndex(where: { $0.key == "\"jira\"" }) {
+            guard case let .object(existing) = members[index].value else { throw .notAnObject }
+            jira = existing
+        }
+        if !jira.contains(where: { $0.key == "\"site\"" }) {
+            jira.append(("\"site\"", try string(site.absoluteString)))
+        }
+        if let email, !jira.contains(where: { $0.key == "\"email\"" }) {
+            jira.append(("\"email\"", try string(email)))
+        }
+        set("\"jira\"", to: .object(jira), in: &members)
+        if !members.contains(where: { $0.key == "\"repos\"" }) {
+            members.append(("\"repos\"", .array([])))
+        }
+        return Data((render(.object(members), indent: "") + "\n").utf8)
+    }
+
+    /// Appends `repo` to `repos` (created when absent), with its `match` rules.
+    public static func addRepo(_ repo: RepoEntry, in data: Data) throws(ConfigEditError) -> Data {
+        var members = try topLevel(of: data)
+        var repos: [Value] = []
+        if let index = members.lastIndex(where: { $0.key == "\"repos\"" }) {
+            guard case let .array(existing) = members[index].value else { throw .notAnObject }
+            repos = existing
+        }
+        func strings(_ values: [String]) throws(ConfigEditError) -> Value {
+            var items: [Value] = []
+            for value in values { items.append(try string(value)) }
+            return .array(items)
+        }
+        var fields: [(key: String, value: Value)] = [
+            ("\"name\"", try string(repo.name)),
+            ("\"path\"", try string(repo.path)),
+            ("\"main_branch\"", try string(repo.mainBranch)),
+        ]
+        if let review = repo.review { fields.append(("\"review\"", try string(review))) }
+        fields.append(("\"match\"", .object([
+            ("\"title_prefixes\"", try strings(repo.titlePrefixes)),
+            ("\"labels\"", try strings(repo.labels)),
+            ("\"components\"", try strings(repo.components)),
+        ])))
+        repos.append(.object(fields))
+        set("\"repos\"", to: .array(repos), in: &members)
+        return Data((render(.object(members), indent: "") + "\n").utf8)
+    }
+
+    /// Removes the entries of `repos` named `name`, every other key kept.
+    public static func removeRepo(named name: String, in data: Data) throws(ConfigEditError) -> Data {
+        var members = try topLevel(of: data)
+        guard let index = members.lastIndex(where: { $0.key == "\"repos\"" }),
+              case let .array(repos) = members[index].value
+        else { throw .notAnObject }
+        let key = try string(name)
+        members[index].value = .array(repos.filter { repo in
+            guard case let .object(fields) = repo else { return true }
+            return !fields.contains { field in
+                guard field.key == "\"name\"", case let .scalar(text) = field.value else { return false }
+                // Compared decoded, so that an escaped spelling in the file still matches.
+                return decoded(text) == decoded(scalarText(key))
+            }
+        })
+        return Data((render(.object(members), indent: "") + "\n").utf8)
+    }
+
+    private static func topLevel(of data: Data) throws(ConfigEditError) -> [(key: String, value: Value)] {
+        guard (try? JSONSerialization.jsonObject(with: data)) != nil else { throw .invalidJSON }
+        var parser = Parser(bytes: Array(data))
+        let root: Value
+        do {
+            root = try parser.document()
+        } catch {
+            throw .invalidJSON
+        }
+        guard case let .object(members) = root else { throw .notAnObject }
+        return members
+    }
+
+    private static func string(_ value: String) throws(ConfigEditError) -> Value {
+        guard let encoded = try? encoder.encode(value) else { throw .invalidName }
+        return .scalar(String(decoding: encoded, as: UTF8.self))
+    }
+
+    private static func scalarText(_ value: Value) -> String {
+        if case let .scalar(text) = value { text } else { "" }
+    }
+
+    private static func decoded(_ text: String) -> String? {
+        try? JSONSerialization.jsonObject(with: Data(text.utf8), options: [.fragmentsAllowed]) as? String
     }
 
     /// Replaces the last `key` (dropping its duplicates), else appends it.
@@ -175,5 +278,29 @@ public enum ConfigEditor {
         private mutating func expect(_ byte: UInt8) throws {
             guard consume(byte) else { throw ParseError() }
         }
+    }
+}
+
+/// A repository entry the app writes into `repos`.
+public struct RepoEntry: Equatable, Sendable {
+    public var name: String
+    public var path: String
+    public var mainBranch: String
+    public var review: String?
+    public var titlePrefixes: [String]
+    public var labels: [String]
+    public var components: [String]
+
+    public init(
+        name: String, path: String, mainBranch: String, review: String?,
+        titlePrefixes: [String], labels: [String], components: [String]
+    ) {
+        self.name = name
+        self.path = path
+        self.mainBranch = mainBranch
+        self.review = review
+        self.titlePrefixes = titlePrefixes
+        self.labels = labels
+        self.components = components
     }
 }

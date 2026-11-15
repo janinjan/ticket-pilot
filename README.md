@@ -13,7 +13,7 @@ You give it a ticket key. It reads everything linked to the ticket, waits for yo
    claude plugin install ticket-pilot@ticket-pilot
    ```
 
-2. Create your config (see [Configure](#configure)) and, in the app, choose "Connect Jira →".
+2. In the app, choose "Connect Jira →" and sign in to Atlassian: the app writes your Jira site and email in its config. Then choose "Add your repositories →": the app lists the checkouts of `~/Developer` (or a folder you pick) with what it detects (platform, main branch, review kind); tick yours and choose Add. No file to edit; the config file is only for the advanced options (see [Configure](#configure)).
 3. In Claude Code, from one of your configured repositories: `/ticket-pilot:start <KEY>`.
 
 ## What it does
@@ -103,6 +103,8 @@ alias tp="$TP_ROOT/bin/tp"
 
 The path changes with each plugin version, so run the `TP_ROOT` line again after an update.
 
+The menu bar app writes the config itself ("Connect Jira →", then "Add your repositories →", and Settings › Repositories): edit the file only for the advanced keys of the [reference](#configuration-reference). Without the app: The skill fills in the rest as it works: when a run works out a setting the repo entry lacks (`setup_command`, `launch_skill`, `guidelines`, the backend checkout or API docs), it asks once, at the end of the report, whether to save it for the next tickets, and saves it with `tp config-set` only on a yes; `ci_review_command` is offered when the CI review job is found, in step 9.
+
 1. Copy the example config:
 
    ```sh
@@ -113,7 +115,7 @@ The path changes with each plugin version, so run the `TP_ROOT` line again after
    Set `TICKET_PILOT_CONFIG` to use another location, and `TICKET_PILOT_HOME` to move the state directory.
 
 2. Edit it: your Jira site, one entry per repository, and the backend paths.
-3. Jira access: by default the menu bar app reads Jira through the Atlassian sign-in ("Connect Jira →"), with no token. A Jira API token is needed only with `jira.auth` set to `api_token`; the skill also uses it as a fallback when the Atlassian MCP server is not available. Store it in the macOS Keychain under the service named by `jira.keychain_service`:
+3. Jira access: by default the menu bar app reads Jira through the Atlassian sign-in ("Connect Jira →"), with no token. A Jira API token is needed only with `jira.auth` set to `api_token`; the skill also uses it as a fallback when the Atlassian MCP server is not available. Store it in the macOS Keychain under the entry `ticket-pilot-jira`:
 
    ```sh
    security add-generic-password -a "$USER" -s "ticket-pilot-jira" -w "<token>"
@@ -134,14 +136,13 @@ Paths accept `~`. Keys marked optional can be omitted.
 | Key | Required | Meaning | Default |
 |---|---|---|---|
 | `jira.site` | yes | Base URL of your Jira site | none |
-| `jira.email` | yes | Account email used for the REST fallback | none |
-| `jira.keychain_service` | yes | Keychain service holding the Jira API token | none |
-| `jira.auth` | no | How the menu bar app reads Jira: `mcp` (sign in to the Atlassian Remote MCP server in the browser, no API token) or `api_token` (REST API with the token of `jira.keychain_service`) | `mcp` |
+| `jira.email` | no | Account email used for the REST fallback and with `jira.auth` `api_token` (the app writes it from the Atlassian sign-in when it tells it) | none |
+| `jira.auth` | no | How the menu bar app reads Jira: `mcp` (sign in to the Atlassian Remote MCP server in the browser, no API token) or `api_token` (REST API with the token of the Keychain entry `ticket-pilot-jira`) | `mcp` |
 | `repos` | yes | List of repositories the plugin may work in | none |
 | `repos[].name` | yes | Unique short name, used in run ids (`KEY--name`) | none |
 | `repos[].path` | yes | Main checkout of the repository (must exist) | none |
 | `repos[].main_branch` | yes | Branch worktrees are created from (`origin/<main_branch>`) | none |
-| `repos[].review` | yes | `gerrit` or `github`: decides the command printed to send the branch | none |
+| `repos[].review` | no | `gerrit` or `github`: decides the command printed to send the branch; left out, the report gives the branch with no command to send it (the app leaves it out when it cannot tell) | none |
 | `repos[].match` | no | `title_prefixes`, `labels`, `components`: how twin tickets of this platform are recognised | none |
 | `repos[].setup_command` | no | Command run in a new worktree and after each checkout of step 9 (project generation, generated code, dependencies) | repo's own build skill |
 | `repos[].env` | no | Object of environment variables applied to every command the skill runs in the worktree (build, tests, `setup_command`, `ci_review_command`), through `tp run-shell` (`tp run-env` prints them as export lines). Names match `[A-Za-z_][A-Za-z0-9_]*`, values are strings that may use `{worktree}` and `{repo}` (absolute paths of the run's worktree and of the main checkout) | none |
@@ -183,7 +184,10 @@ Useful `tp` commands (`TP_ROOT` is defined in Configure; with the alias, just `t
 "$TP_ROOT/bin/tp" run-show <KEY>--<repo>   # state of a run
 "$TP_ROOT/bin/tp" run-shell <KEY>--<repo> '<cmd>'  # one command in the run's worktree, with its env, in your login shell
 "$TP_ROOT/bin/tp" commit-size --staged     # size of the staged change against the threshold
+"$TP_ROOT/bin/tp" config-set --repo <repo> setup_command '<cmd>'  # save one setting, every other key kept
 ```
+
+`config-set` sets, on a repo entry (`--repo`), `setup_command`, `sync_command`, `launch_skill`, `ci_review_prompt`, `ci_review_command` or adds a `guidelines` entry; without `--repo`, `sync_command` or adds a `backend.repos` or `backend.api_docs` entry. It writes nothing, and says why, when the key is not one of these, the repo is unknown or the result would not pass `config-check`; a symlinked config is edited where it points.
 
 If a run was stopped, starting the same ticket again offers to resume it at the step where it stopped.
 
@@ -214,12 +218,14 @@ A click on it opens a panel (it scrolls when it gets tall), from top to bottom:
 - a footer with Quit (⌘Q), always in sight;
 - only when you must act, one line or a banner (otherwise the cards start right under the header): "N tickets need you" when runs wait for you (their cards are listed below), or, when the setup must be fixed, a banner, "Almost there! 👋" with what is missing ("Connect Jira to see your tickets here.") and the button that fixes it, with an arrow ("Connect Jira →"). The buttons, in this order of priority:
   - "Install Claude Code…" (opens its documentation);
-  - "Install the Claude Code plugin…" (installs the plugin the app carries, after showing the commands);
+  - "Install the Claude Code plugin…" (installs the plugin the app carries: "Install the TicketPilot plugin?" says what it is for and its version; then "TicketPilot plugin <version> installed" says that tickets started from TicketPilot use it, and that a Claude Code session already open sees it after a restart, since Claude Code loads plugins when a session starts. The commands it runs, `claude plugin marketplace add <the app's plugin folder>` and `claude plugin install ticket-pilot@ticket-pilot`, only show when one fails);
+  - "Connect Jira…" when there is no config yet: the Atlassian sign-in (straight away when one is stored), then the app writes `jira.site` and `jira.email` to `~/.config/ticket-pilot/config.json` (or `TICKET_PILOT_CONFIG`), creating it, and fills only what is missing in a file written by hand; with several Jira sites it asks which one, and an account with no Jira site gets "See why…" instead;
+  - "Fix the config…" (a config that does not load: says why). Without a config, or with a broken one, the app does not read Jira and reads the config again each time the panel opens;
   - "Connect Jira…" (opens the Atlassian sign-in, or asks for the token with `jira.auth` `api_token`; also when the Keychain refuses to give the stored one);
   - "See why Jira refused…" (Atlassian's own message, an administrator block for example);
   - "Check again" (Jira unreachable);
+  - "Add your repositories…" (no repository in the config): a window lists the main checkouts right inside the folder that holds the repos already added, else `~/Developer`, else a folder you pick ("Other folder…" picks another; a folder that is itself a checkout lists it alone; hidden folders, linked worktrees and repos already added are left out). Each row is a tick, the folder and what the app detected: the platform (iOS for an Xcode project or `Package.swift`, Android for Gradle, Web for a `package.json`), the main branch (`origin/HEAD`, else `main` or `master`) and the review kind (Gerrit for port 29418, its `/a/` HTTP path or a `gerrit…` or `review.…` host, GitHub for a `github` or `*.ghe.com` host; left out when none fits, as for a repo with no remote). A field only appears for a main branch that could not be found, and "Add N" waits for it. A platform found in one checkout only, and that the config does not have yet, is ticked; adding more repos later ticks nothing for a platform already there. The names are chosen: `ios`, `android` or `web` for the first ticked checkout of each platform, the folder's name for the others (numbered when taken), with the `match` rules of the platform, whatever the name (`[iOS]` and `iOS` for iOS, `[Android]`, `[AND]` and `Android` for Android, `[Web]` and `Web` for web; else `[<name>]` and `<name>`), so that a second checkout of a platform recognises its tickets too. A repo is written as its main checkout's root, the folder the skill finds it by.
   - "Repository not found: <name>…";
-  - "Fix the config…";
   - last, "Update the Claude Code plugin (<installed> → <carried>)…", since an older plugin still runs.
 
   The MCP servers and the disk space are only warnings and never show there;
@@ -238,11 +244,12 @@ A card is titled with the ticket's title: the one the plugin recorded (`tp run-s
 **Settings…** opens a small window with:
 
 - the config file (`~/.config/ticket-pilot/config.json`, or `TICKET_PILOT_CONFIG`), with Open (in your default text editor) and Show in Finder;
+- Repositories: one row per repo, its folder's name over "<platform> · <main branch> · <review>" ("Android · delivery · Gerrit"; the platform comes from the repo's name, else from its `match` title prefixes; the full path shows on hover), with a remove button (asks first, removes only its entry from the config, never its folder, and is refused while one of its runs is listed: remove its worktrees first), and "Add repositories…" (as in the banner);
 - Open at login;
 - "Play a sound when TicketPilot needs you" (on by default: a go, a question, "launch the app" or a ready report plays the default notification sound; a plain end of turn and a new ticket never do);
 - "Send a test notification" (with the sound when it is on; when macOS does not allow TicketPilot's notifications, it explains how to allow them and opens System Settings › Notifications), with the current state under it ("Notifications: allowed", "sound off" or "not allowed");
 - the terminal sessions open in ("Automatic (<the one detected>)" or one of the known terminals installed, or Terminal; the choice is saved as `terminal_app` in your config, every other key kept, and "Automatic" removes the key);
-- Diagnostics (every setup check with ✓ or ✗, its detail, its fix command to copy, and "Set Jira token…" when needed; the plugin line reads "installed <version> · bundled <version>"; the Repos line lists each repo as "<name> · <path> · <main branch>", with its guidelines when it has some and "(not found)" after a missing path) and Check again, which runs every check again, reloads the config and reads Jira at once ("Checking…" while it runs, then "Checked at <time>").
+- Diagnostics (every setup check with ✓ or ✗, its detail, its fix command to copy, and "Set Jira token…" when needed; the plugin line reads "installed <version> · bundled <version>"; the Repos line says how many repositories were found, or names those whose folder is missing; Settings › Repositories lists them) and Check again, which runs every check again, reloads the config and reads Jira at once ("Checking…" while it runs, then "Checked at <time>").
 
 **About TicketPilot** shows the app icon, its name, the version, the copyright and the license, with no links (the issues are behind Send feedback). Settings and About close with ⌘W.
 
@@ -252,7 +259,7 @@ By default (`jira.auth` absent or `mcp`), the app reads Jira through the Atlassi
 
 Under the hood: OAuth 2.1 with dynamic client registration of a public "TicketPilot" client, PKCE (S256) and a one-shot listener on `127.0.0.1` (random port, closed after the callback or five minutes; it only accepts the callback of this sign-in). The sign-in (client id, access and refresh tokens, expiry) is one Keychain item of the service `ticket-pilot-atlassian-mcp` (this Mac only, readable while it is unlocked), refreshed when it expires, never written to a file or a log. Jira is then read with the server's `getAccessibleAtlassianResources` (the site of `jira.site`), `searchJiraIssuesUsingJql` and `atlassianUserInfo` tools, the only ones the app calls.
 
-With `jira.auth` set to `api_token`, if the Jira token is missing, choose "Connect Jira…" in the panel (or "Set Jira token…" in Settings) to enter it: it is stored in the Keychain under the `jira.keychain_service` of your config (account: your user name). The "Connect Jira" dialog explains the three steps: "Create a token" opens the Atlassian page where API tokens are made (the dialog stays open), create and copy the token, then paste it and choose Save. "Use the Atlassian sign-in instead…" in Settings › Jira switches back.
+With `jira.auth` set to `api_token`, if the Jira token is missing, choose "Connect Jira…" in the panel (or "Set Jira token…" in Settings) to enter it: it is stored in the Keychain under the entry `ticket-pilot-jira` (account: your user name). The "Connect Jira" dialog explains the three steps: "Create a token" opens the Atlassian page where API tokens are made (the dialog stays open), create and copy the token, then paste it and choose Save. "Use the Atlassian sign-in instead…" in Settings › Jira switches back.
 
 When the Keychain refuses to give the stored sign-in or token, the panel offers "Connect Jira →".
 
@@ -274,14 +281,14 @@ What it reads:
 
 - the run files `runs/*.json` in the state directory (`~/Library/Application Support/ticket-pilot/`, or `TICKET_PILOT_HOME`);
 - your config (`~/.config/ticket-pilot/config.json`, or `TICKET_PILOT_CONFIG`);
-- your Atlassian sign-in, from the Keychain service `ticket-pilot-atlassian-mcp` (with `jira.auth` `mcp`), or your Jira API token, from the Keychain service named by `jira.keychain_service` (with `api_token`). Neither is ever written to a file or a log;
+- your Atlassian sign-in, from the Keychain service `ticket-pilot-atlassian-mcp` (with `jira.auth` `mcp`), or your Jira API token, from the Keychain entry `ticket-pilot-jira` (with `api_token`). Neither is ever written to a file or a log;
 - the disk usage of each finished run's worktree (with `du`), shown in that run's "⋯" menu ("Show in Finder · <size>");
 - the number of commits of each finished run (`git rev-list --count --cherry-pick --right-only --no-merges origin/<main_branch>...HEAD`, in its worktree), shown on its card. It never fetches: the count follows `origin/<main_branch>` as your last `git fetch` left it.
 
 What it writes:
 
 - its own state in `app/` inside the state directory (tickets already seen, acknowledged questions, helper scripts);
-- your config, only when you pick a terminal or switch the Jira connection in Settings: it sets or removes `terminal_app`, or sets `jira.auth`, and keeps every other key in place (the file is rewritten pretty-printed, two spaces);
+- your config, only when you connect Jira without one (it creates it with `jira.site`, `jira.email` and an empty `repos`, or fills those two keys when missing), add or remove a repository, pick a terminal or switch the Jira connection in Settings: it adds or removes a `repos` entry, sets or removes `terminal_app`, or sets `jira.auth`, and keeps every other key in place (the file is rewritten pretty-printed, two spaces);
 - when you choose "Remove worktree…" (in the card's "⋯" menu) for a finished run (or a run whose ticket is done in Jira), after a confirmation that lists what goes: it removes that run's worktree, then its branch and the branch checked out in the worktree when it is another one, then its run file, and stops at the first step git refuses. A worktree with uncommitted changes is kept, and so are the branches and the run file. A branch is deleted when `origin/<main_branch>` has all its commits by content (merged under other hashes, as Gerrit does) or when git sees it merged; any other branch is kept with the run file, but the worktree is already removed at that point; the alert gives the `git branch -D` command to run yourself, then "Remove worktree…" again finishes the job. It never deletes the repo's main branch or the branch checked out in the repo.
 
 It only reads Jira: it never transitions a ticket, comments or edits a field. It never launches `claude` without a click: a session starts only when you choose it in the panel. The one exception is the setup check, which runs `claude mcp list` when the app starts and on "Check again" (Settings) to see whether the Atlassian and Figma servers are connected. Installing or updating the plugin runs `claude plugin` commands only after you click its button and confirm the commands listed.

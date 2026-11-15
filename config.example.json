@@ -2,7 +2,6 @@
   "jira": {
     "site": "https://your-site.atlassian.net",
     "email": "you@example.com",
-    "keychain_service": "ticket-pilot-jira",
     "auth": "mcp"
   },
   "repos": [

@@ -155,21 +155,45 @@ public actor MCPJiraClient: JiraSearching {
         if let cloudID { return cloudID }
         let result = try await call(Tool.resources, arguments: [:])
         let host = site.host?.lowercased() ?? site.absoluteString
-        var resources: [[String: Any]] = []
-        for json in Self.jsonObjects(in: result) {
-            if let array = json as? [[String: Any]] {
-                resources = array
-            } else if let object = json as? [String: Any], let array = object["resources"] as? [[String: Any]] {
-                resources = array
-            }
-            if !resources.isEmpty { break }
-        }
+        let resources = Self.resources(in: result)
         let match = resources.first { resource in
             (resource["url"] as? String).flatMap(URL.init(string:))?.host?.lowercased() == host
         }
         let id = (match?["id"] as? String) ?? host
         cloudID = id
         return id
+    }
+
+    /// The sites of `getAccessibleAtlassianResources`: a bare array, or one under `resources`.
+    private static func resources(in result: MCPToolResult) -> [[String: Any]] {
+        for json in jsonObjects(in: result) {
+            if let array = json as? [[String: Any]], !array.isEmpty { return array }
+            if let object = json as? [String: Any], let array = object["resources"] as? [[String: Any]], !array.isEmpty {
+                return array
+            }
+        }
+        return []
+    }
+
+    // MARK: - Account
+
+    /// The signed-in account's email and the sites it can open Jira on (a scope naming Jira), in the
+    /// server's order: what a first setup writes in the config.
+    public static func account(tools: MCPToolCalling) async throws(JiraError) -> AtlassianAccount {
+        // Neither call depends on the site: any placeholder will do.
+        let client = MCPJiraClient(site: URL(string: "https://atlassian.net")!, tools: tools)
+        let email = try await client.accountEmail()
+        let result = try await client.call(Tool.resources, arguments: [:])
+        var sites: [URL] = []
+        for resource in resources(in: result) {
+            let scopes = resource["scopes"] as? [String] ?? []
+            guard scopes.contains(where: { $0.lowercased().contains("jira") }),
+                  let url = (resource["url"] as? String).flatMap(URL.init(string:)),
+                  !sites.contains(url)
+            else { continue }
+            sites.append(url)
+        }
+        return AtlassianAccount(email: email, sites: sites)
     }
 
     // MARK: - Calls
@@ -226,5 +250,31 @@ public actor MCPJiraClient: JiraSearching {
         let candidates = (result.structured.map { [$0] } ?? []) + result.texts.map { Data($0.utf8) }
         return candidates.compactMap { try? JSONSerialization.jsonObject(with: $0, options: [.fragmentsAllowed]) }
             .filter { $0 is [Any] || $0 is [String: Any] }
+    }
+}
+
+/// Who signed in to Atlassian, and the Jira sites the account can open.
+public struct AtlassianAccount: Equatable, Sendable {
+    public var email: String?
+    public var sites: [URL]
+
+    public init(email: String?, sites: [URL]) {
+        self.email = email
+        self.sites = sites
+    }
+
+    /// No site (nothing to write), the only one, or a choice to ask among several.
+    public enum SiteChoice: Equatable, Sendable {
+        case noSite
+        case only(URL)
+        case ask([URL])
+    }
+
+    public var siteChoice: SiteChoice {
+        switch sites.count {
+        case 0: .noSite
+        case 1: .only(sites[0])
+        default: .ask(sites)
+        }
     }
 }

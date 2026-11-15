@@ -96,16 +96,42 @@ public struct PluginInstaller: Sendable {
 
     /// "TicketPilot will run: …", for the alert asked before `run`: "Update the Claude Code plugin?" when the
     /// plan updates the installed plugin, else "Install the Claude Code plugin?".
-    public static func confirmation(_ plan: [PluginCommand]) -> AlertText {
-        AlertText(
-            title: "\(confirmButton(plan)) the Claude Code plugin?",
-            message: (["TicketPilot will run:"] + plan.map(\.display)).joined(separator: "\n")
+    /// What the alert asks, in plain words: what the plugin is for and the version the app carries. The
+    /// commands themselves only show when they fail.
+    public static func confirmation(_ plan: [PluginCommand], version: String?) -> AlertText {
+        if isUpdate(plan) {
+            return AlertText(
+                title: "Update the TicketPilot plugin?",
+                message: version.map { "Version \($0) is ready for Claude Code." } ?? "A new version is ready for Claude Code."
+            )
+        }
+        return AlertText(
+            title: "Install the TicketPilot plugin?",
+            message: "Claude Code needs it to work on your tickets." + (version.map { "\nVersion \($0)." } ?? "")
         )
+    }
+
+    /// What the app says once the plan ran. Claude Code loads plugins when a session starts: the sessions
+    /// TicketPilot opens are new, only one already open needs a restart.
+    public static func success(_ plan: [PluginCommand], version: String?) -> AlertText {
+        let title = if isUpdate(plan) {
+            "TicketPilot plugin updated" + (version.map { " to \($0)" } ?? "")
+        } else {
+            "TicketPilot plugin" + (version.map { " \($0)" } ?? "") + " installed"
+        }
+        return AlertText(
+            title: title,
+            message: "Tickets you start from TicketPilot use it. A Claude Code session already open sees it after a restart."
+        )
+    }
+
+    private static func isUpdate(_ plan: [PluginCommand]) -> Bool {
+        plan.contains { $0.arguments.starts(with: ["plugin", "update"]) }
     }
 
     /// The alert's button: "Update" when the plan updates the installed plugin, else "Install".
     public static func confirmButton(_ plan: [PluginCommand]) -> String {
-        plan.contains { $0.arguments.starts(with: ["plugin", "update"]) } ? "Update" : "Install"
+        isUpdate(plan) ? "Update" : "Install"
     }
 
     private func marketplaceNames() throws(PluginInstallError) -> [String] {

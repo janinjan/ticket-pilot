@@ -108,7 +108,8 @@ def validate(cfg: dict) -> list[str]:
         if name in seen:
             problems.append("repos[%s].name is duplicated" % name)
         seen.add(name)
-        if repo.get("review") not in REVIEW_KINDS:
+        # Optional: the app leaves it out when it cannot tell how the repo is reviewed.
+        if "review" in repo and repo.get("review") not in REVIEW_KINDS:
             problems.append("repos[%s].review must be 'gerrit' or 'github'" % name)
         if not repo.get("main_branch"):
             problems.append("repos[%s].main_branch is required" % name)
@@ -188,3 +189,67 @@ def repo_by_name(cfg: dict, name: str) -> dict | None:
         if isinstance(repo, dict) and repo.get("name") == name:
             return repo
     return None
+
+
+# Settings the skill may save once a run worked them out (`tp config-set`): a string replaces the value,
+# a list gains it once.
+SETTABLE_REPO_KEYS = {
+    "setup_command": str,
+    "sync_command": str,
+    "launch_skill": str,
+    "ci_review_prompt": str,
+    "ci_review_command": str,
+    "guidelines": list,
+}
+SETTABLE_TOP_KEYS = {
+    "sync_command": str,
+    "backend.repos": list,
+    "backend.api_docs": list,
+}
+
+
+def set_value(key: str, value: str, repo_name: str | None = None, path: Path | None = None) -> list[str]:
+    """Save one setting in the config file, every other key kept; return the problems (nothing written).
+
+    The file is written only when the result passes `validate`; a symlinked config is edited where it
+    points.
+    """
+    allowed = SETTABLE_REPO_KEYS if repo_name else SETTABLE_TOP_KEYS
+    if key not in allowed:
+        where = "a repo" if repo_name else "the top level"
+        return ["%s cannot be set on %s; settable: %s" % (key, where, ", ".join(sorted(allowed)))]
+    config_file = (Path(path) if path is not None else paths.config_path()).resolve()
+    try:
+        data = json.loads(config_file.read_text())
+    except (OSError, ValueError) as error:
+        return ["config file is not readable JSON: %s" % error]
+    if not isinstance(data, dict):
+        return ["config must be a JSON object"]
+    if repo_name:
+        target = repo_by_name(data, repo_name)
+        if target is None:
+            return ["no repo named %s in the config" % repo_name]
+    else:
+        target = data
+    *parents, leaf = key.split(".")
+    for parent in parents:
+        target = target.setdefault(parent, {})
+        if not isinstance(target, dict):
+            return ["%s is not an object" % parent]
+    if allowed[key] is list:
+        values = target.get(leaf) if isinstance(target.get(leaf), list) else []
+        if value not in values:
+            values.append(value)
+        target[leaf] = values
+    else:
+        target[leaf] = value
+    checked = copy.deepcopy(DEFAULTS)
+    checked.update(copy.deepcopy(data))
+    checked["_path"] = str(config_file)
+    problems = validate(checked)
+    if problems:
+        return problems
+    temporary = config_file.with_name(config_file.name + ".tmp")
+    temporary.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+    temporary.replace(config_file)
+    return []

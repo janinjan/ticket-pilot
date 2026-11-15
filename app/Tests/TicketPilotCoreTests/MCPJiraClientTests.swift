@@ -260,4 +260,43 @@ struct MCPJiraClientTests {
             try await jira.openAssignedIssues()
         }
     }
+
+    // MARK: - Account
+
+    @Test func test_accountListsItsJiraSites() async throws {
+        let confluence = #"{"id":"c","url":"https://wiki.atlassian.net","name":"wiki","scopes":["read:confluence-content.all"]}"#
+        let resources = MCPJiraFixtures.resources.replacingOccurrences(of: "}]", with: "}," + confluence + "]")
+        let tools = FakeTools { name, _ throws(MCPError) in
+            switch name {
+            case "getAccessibleAtlassianResources": return text(resources)
+            case "atlassianUserInfo": return text(MCPJiraFixtures.userInfo)
+            default: throw .tool("unknown tool \(name)")
+            }
+        }
+        let account = try await MCPJiraClient.account(tools: tools)
+        #expect(account == AtlassianAccount(
+            email: "me@example.com",
+            sites: [URL(string: "https://other.atlassian.net")!, URL(string: "https://example.atlassian.net")!]
+        ))
+    }
+
+    @Test func test_accountWithoutJiraHasNoSites() async throws {
+        let tools = FakeTools { name, _ throws(MCPError) in
+            switch name {
+            case "getAccessibleAtlassianResources":
+                return text(#"[{"id":"c","url":"https://wiki.atlassian.net","scopes":["read:confluence-content.all"]}]"#)
+            case "atlassianUserInfo": return text(MCPJiraFixtures.userInfo)
+            default: throw .tool("unknown tool \(name)")
+            }
+        }
+        #expect(try await MCPJiraClient.account(tools: tools).sites.isEmpty)
+    }
+
+    @Test func test_theSiteIsAskedOnlyAmongSeveral() {
+        let one = URL(string: "https://a.atlassian.net")!
+        let two = URL(string: "https://b.atlassian.net")!
+        #expect(AtlassianAccount(email: nil, sites: []).siteChoice == .noSite)
+        #expect(AtlassianAccount(email: nil, sites: [one]).siteChoice == .only(one))
+        #expect(AtlassianAccount(email: nil, sites: [one, two]).siteChoice == .ask([one, two]))
+    }
 }

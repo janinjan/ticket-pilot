@@ -83,12 +83,36 @@ import Testing
         ))
     }
 
-    @Test func test_configErrorComesBeforeEverything() {
-        let problem = SetupProblem.first(in: [Self.claude], configError: "not found at /c.json")
+    @Test func test_claudeAndThePluginComeBeforeTheConfig() {
+        #expect(SetupProblem.first(in: [Self.claude, Self.plugin], config: .missing)?.title == "Install Claude Code…")
+        #expect(SetupProblem.first(in: [Self.plugin], config: .missing)?.title == "Install the Claude Code plugin…")
+        #expect(SetupProblem.first(in: [Self.plugin], config: .invalid("bad"))?.title == "Install the Claude Code plugin…")
+    }
+
+    @Test func test_missingConfigConnectsJiraFirst() {
+        let problem = SetupProblem.first(in: [Self.repos, Self.unreachable], config: .missing)
+        #expect(problem == SetupProblem(
+            title: "Connect Jira…",
+            explanation: "Connect Jira to get started.",
+            action: .connectAtlassian
+        ))
+    }
+
+    @Test func test_noReposAsksToAddOneAfterJira() {
+        #expect(SetupProblem.first(in: [Self.noToken], config: .noRepos)?.action == .setJiraToken)
+        #expect(SetupProblem.first(in: [Self.fine, Self.outdated], config: .noRepos) == SetupProblem(
+            title: "Add your repositories…",
+            explanation: "Add the repositories you work in.",
+            action: .addRepository
+        ))
+    }
+
+    @Test func test_invalidConfigExplainsWhatIsWrongBeforeJira() {
+        let problem = SetupProblem.first(in: [Self.noToken], config: .invalid("/c.json: bad JSON"))
         #expect(problem == SetupProblem(
             title: "Fix the config…",
             explanation: "Fix your config to get started.",
-            action: .explain(AlertText(title: "Config", message: "not found at /c.json"))
+            action: .explain(AlertText(title: "Config", message: "/c.json: bad JSON"))
         ))
     }
 

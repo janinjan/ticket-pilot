@@ -137,16 +137,33 @@ private final class FakeClaude: ProcessRunning, @unchecked Sendable {
         ))
     }
 
-    @Test func test_confirmationListsTheExactCommands() throws {
+    /// Plain words for someone who never typed a `claude plugin` command: what it is for, its version.
+    @Test func test_confirmationSaysWhatThePluginIsFor() throws {
         let runner = FakeClaude(listOutput: Self.withMarketplace)
+        let install = try installer(runner).plan(pluginInstalled: false)
+        #expect(PluginInstaller.confirmation(install, version: "0.5.0") == AlertText(
+            title: "Install the TicketPilot plugin?",
+            message: "Claude Code needs it to work on your tickets.\nVersion 0.5.0."
+        ))
+        #expect(PluginInstaller.confirmation(install, version: nil).message == "Claude Code needs it to work on your tickets.")
+        #expect(PluginInstaller.confirmButton(install) == "Install")
         let update = try installer(runner).plan(pluginInstalled: true)
-        #expect(PluginInstaller.confirmation(update) == AlertText(
-            title: "Update the Claude Code plugin?",
-            message: "TicketPilot will run:\nclaude plugin marketplace update ticket-pilot\nclaude plugin update ticket-pilot@ticket-pilot"
+        #expect(PluginInstaller.confirmation(update, version: "0.5.0") == AlertText(
+            title: "Update the TicketPilot plugin?",
+            message: "Version 0.5.0 is ready for Claude Code."
         ))
         #expect(PluginInstaller.confirmButton(update) == "Update")
-        let install = try installer(runner).plan(pluginInstalled: false)
-        #expect(PluginInstaller.confirmation(install).title == "Install the Claude Code plugin?")
-        #expect(PluginInstaller.confirmButton(install) == "Install")
+    }
+
+    @Test func test_successSaysWhatToDoNext() throws {
+        let runner = FakeClaude(listOutput: Self.withMarketplace)
+        #expect(PluginInstaller.success(try installer(runner).plan(pluginInstalled: false), version: "0.5.0") == AlertText(
+            title: "TicketPilot plugin 0.5.0 installed",
+            message: "Tickets you start from TicketPilot use it. A Claude Code session already open sees it after a restart."
+        ))
+        #expect(PluginInstaller.success(try installer(runner).plan(pluginInstalled: true), version: "0.5.0").title
+            == "TicketPilot plugin updated to 0.5.0")
+        #expect(PluginInstaller.success(try installer(runner).plan(pluginInstalled: false), version: nil).title
+            == "TicketPilot plugin installed")
     }
 }

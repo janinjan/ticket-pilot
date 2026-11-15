@@ -16,7 +16,28 @@ public struct SetupProblem: Equatable, Sendable {
         case checkAgain
         /// Installs or updates the Claude Code plugin the app carries.
         case installPlugin(PluginState)
+        /// Picks a checkout in the Finder and adds it to the config.
+        case addRepository
     }
+
+    /// What the config still lacks: no file yet (the Jira sign-in writes it), a file that does not load,
+    /// or no repository.
+    public enum ConfigProblem: Equatable, Sendable {
+        case missing
+        case invalid(String)
+        case noRepos
+    }
+
+    /// The Atlassian account signed in can open no Jira site: nothing to write in the config.
+    public static let noJiraSite = SetupProblem(
+        title: "See why…",
+        explanation: "This Atlassian account has no Jira site.",
+        action: .explain(AlertText(
+            title: "No Jira site",
+            message: "The account you signed in with can't open any Jira site. Sign in with your work account: "
+                + "Settings › Jira › Disconnect, then Connect Jira."
+        ))
+    )
 
     /// The button that fixes it ("Connect Jira…").
     public var title: String
@@ -37,22 +58,16 @@ public struct SetupProblem: Equatable, Sendable {
 
     static let claudeCodeURL = URL(string: "https://docs.claude.com/claude-code")!
 
-    /// In order: a config error, Claude Code missing, the plugin missing, Jira to connect (the token to
-    /// enter or the Atlassian sign-in to make, also when the Keychain refuses to read the stored one; or
-    /// Atlassian's refusal to explain), Jira unreachable (or failing to answer the poll), a repo path missing, an
-    /// older plugin than the one the app carries (it still runs, so the update comes last).
+    /// In order: Claude Code missing, the plugin missing (neither needs a config, so a first launch starts
+    /// there), no config (the Jira sign-in creates it) or a broken one, Jira to connect (the token to enter or the Atlassian
+    /// sign-in to make, also when the Keychain refuses to read the stored one; or Atlassian's refusal to
+    /// explain), Jira unreachable (or failing to answer the poll), no repository, a repo path missing, an older plugin than
+    /// the one the app carries (it still runs, so the update comes last).
     /// `jiraFailing` only counts once the checks are in, so a missing token is not shown as unreachable first.
     /// The other failed checks (MCP servers, disk space) are only warnings: they stay in Diagnostics.
     public static func first(
-        in checks: [HealthCheck], configError: String? = nil, jiraFailing: Bool = false
+        in checks: [HealthCheck], config: ConfigProblem? = nil, jiraFailing: Bool = false
     ) -> SetupProblem? {
-        if let configError {
-            return SetupProblem(
-                title: "Fix the config…",
-                explanation: "Fix your config to get started.",
-                action: .explain(AlertText(title: "Config", message: configError))
-            )
-        }
         func failed(_ kind: HealthCheck.Kind) -> HealthCheck? {
             checks.first { $0.id == kind && !$0.ok }
         }
@@ -68,6 +83,18 @@ public struct SetupProblem: Equatable, Sendable {
                 explanation: "Install the Claude Code plugin to start a ticket.",
                 action: .installPlugin(.missing)
             )
+        }
+        switch config {
+        case .missing:
+            return SetupProblem(title: "Connect Jira…", explanation: "Connect Jira to get started.", action: .connectAtlassian)
+        case let .invalid(message):
+            return SetupProblem(
+                title: "Fix the config…",
+                explanation: "Fix your config to get started.",
+                action: .explain(AlertText(title: "Config", message: message))
+            )
+        case .noRepos, nil:
+            break
         }
         if failed(.jiraToken) != nil {
             return SetupProblem(title: "Connect Jira…", explanation: "Connect Jira to see your tickets here.", action: .setJiraToken)
@@ -89,6 +116,9 @@ public struct SetupProblem: Equatable, Sendable {
                 explanation: "Jira can't be reached right now. Check your network.",
                 action: .checkAgain
             )
+        }
+        if config == .noRepos {
+            return SetupProblem(title: "Add your repositories…", explanation: "Add the repositories you work in.", action: .addRepository)
         }
         if let repos = failed(.repoPaths) {
             return SetupProblem(

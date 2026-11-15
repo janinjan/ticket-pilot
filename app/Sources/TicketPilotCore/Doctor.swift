@@ -32,8 +32,6 @@ public struct HealthCheck: Equatable, Identifiable, Sendable {
     public var refusedByServer: Bool
     /// For the plugin check: the installed plugin compared with the copy the app carries.
     public var pluginState: PluginState?
-    /// For the repos check: one line per repo (name, folder, main branch, guidelines), shown in Settings.
-    public var lines: [String]
 
     public init(
         id: Kind,
@@ -44,8 +42,7 @@ public struct HealthCheck: Equatable, Identifiable, Sendable {
         blockedRepos: [String] = [],
         needsToken: Bool = false,
         refusedByServer: Bool = false,
-        pluginState: PluginState? = nil,
-        lines: [String] = []
+        pluginState: PluginState? = nil
     ) {
         self.id = id
         self.ok = ok
@@ -56,7 +53,6 @@ public struct HealthCheck: Equatable, Identifiable, Sendable {
         self.needsToken = needsToken
         self.refusedByServer = refusedByServer
         self.pluginState = pluginState
-        self.lines = lines
     }
 }
 
@@ -94,7 +90,8 @@ public struct Doctor: Sendable {
     private static let lowDiskBytes: Int64 = 10 * 1024 * 1024 * 1024
     private static let mcpNames = ["atlassian", "figma"]
 
-    private let config: AppConfig
+    /// Nil while there is no usable config: only the checks that need none run.
+    private let config: AppConfig?
     private let home: URL
     private let runner: ProcessRunning
     private let jira: JiraSearching?
@@ -113,7 +110,7 @@ public struct Doctor: Sendable {
     }
 
     public init(
-        config: AppConfig,
+        config: AppConfig?,
         home: URL,
         runner: ProcessRunning,
         jira: JiraSearching?,
@@ -144,14 +141,17 @@ public struct Doctor: Sendable {
                 && !isDirectory.boolValue
                 && FileManager.default.isExecutableFile(atPath: $0)
         }
-        let jiraChecks = await checkJira()
+        guard let config else {
+            return [checkClaude(path: claudePath), checkPlugin(), checkMCP(claudePath: claudePath), checkDiskSpace()]
+        }
+        let jiraChecks = await checkJira(config)
         return [
             checkClaude(path: claudePath),
             checkPlugin(),
             jiraChecks.token,
             jiraChecks.reachable,
             checkMCP(claudePath: claudePath),
-            checkRepoPaths(),
+            checkRepoPaths(config),
             checkDiskSpace(),
         ]
     }
@@ -195,8 +195,13 @@ public struct Doctor: Sendable {
     }
 
     private func bundledPluginVersion() -> String? {
-        guard let bundledPluginManifest,
-              let data = try? Data(contentsOf: bundledPluginManifest),
+        Self.pluginVersion(manifest: bundledPluginManifest)
+    }
+
+    /// The `version` of a plugin manifest (`.claude-plugin/plugin.json`).
+    public static func pluginVersion(manifest: URL?) -> String? {
+        guard let manifest,
+              let data = try? Data(contentsOf: manifest),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return nil }
         return root["version"] as? String
@@ -213,14 +218,14 @@ public struct Doctor: Sendable {
         return first["version"] as? String ?? "unknown"
     }
 
-    private func checkJira() async -> (token: HealthCheck, reachable: HealthCheck) {
+    private func checkJira(_ config: AppConfig) async -> (token: HealthCheck, reachable: HealthCheck) {
         switch config.jira.auth {
-        case .apiToken: await checkJiraToken()
-        case .mcp: await checkJiraSignIn()
+        case .apiToken: await checkJiraToken(config)
+        case .mcp: await checkJiraSignIn(config)
         }
     }
 
-    private func checkJiraSignIn() async -> (token: HealthCheck, reachable: HealthCheck) {
+    private func checkJiraSignIn(_ config: AppConfig) async -> (token: HealthCheck, reachable: HealthCheck) {
         let site = config.jira.site.absoluteString
         do {
             _ = try tokenLookup()
@@ -291,8 +296,8 @@ public struct Doctor: Sendable {
         return HealthCheck(id: .jiraReachable, ok: false, detail: detail, fix: fix, blocksStart: true)
     }
 
-    private func checkJiraToken() async -> (token: HealthCheck, reachable: HealthCheck) {
-        let service = config.jira.keychainService
+    private func checkJiraToken(_ config: AppConfig) async -> (token: HealthCheck, reachable: HealthCheck) {
+        let service = JiraSettings.tokenKeychainService
         do {
             _ = try tokenLookup()
         } catch {
@@ -366,27 +371,20 @@ public struct Doctor: Sendable {
         return HealthCheck(id: .mcp, ok: false, detail: "Not connected: " + concerned.joined(separator: ", "))
     }
 
-    /// One line per repo: its name, folder, main branch and guidelines; a missing folder is marked.
-    private func checkRepoPaths() -> HealthCheck {
-        var missing: [String] = []
-        let lines = config.repos.map { repo in
-            var parts = [RepoName.display(repo.name), repo.path, repo.mainBranch]
-            if !repo.guidelines.isEmpty {
-                parts.append("guidelines: " + repo.guidelines.joined(separator: ", "))
-            }
-            let line = parts.joined(separator: " · ")
-            guard FileManager.default.fileExists(atPath: (repo.path as NSString).expandingTildeInPath) else {
-                missing.append(repo.name)
-                return line + " (not found)"
-            }
-            return line
-        }
+    /// Whether every repo folder is there: how many, or the ones missing. Settings › Repositories lists
+    /// each repo.
+    private func checkRepoPaths(_ config: AppConfig) -> HealthCheck {
+        let missing = config.repos
+            .filter { !FileManager.default.fileExists(atPath: ($0.path as NSString).expandingTildeInPath) }
+            .map(\.name)
+        let count = config.repos.count
         return HealthCheck(
             id: .repoPaths,
             ok: missing.isEmpty,
-            detail: missing.isEmpty ? "All repo paths exist" : "Path not found for: " + missing.joined(separator: ", "),
-            blockedRepos: missing,
-            lines: lines
+            detail: missing.isEmpty
+                ? "\(count) \(count == 1 ? "repository" : "repositories") found"
+                : "Path not found for: " + missing.joined(separator: ", "),
+            blockedRepos: missing
         )
     }
 
