@@ -103,8 +103,12 @@ import Testing
         defer { f.cleanUp() }
         let report = RunReport.file(runID: f.run.id, runsDirectory: f.runsDirectory)
         try Data("# Report".utf8).write(to: report)
+        let shots = f.runsDirectory.appendingPathComponent("\(f.run.id).screenshots")
+        try FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
+        try Data("png".utf8).write(to: shots.appendingPathComponent("case-1.png"))
         let plan = ReleasePlan.make(run: f.run, runsDirectory: f.runsDirectory)
         try Releaser(runner: SystemProcessRunner()).release(plan)
+        #expect(!f.fileManager.fileExists(atPath: shots.path))
         #expect(!f.fileManager.fileExists(atPath: f.worktree.path))
         #expect(try f.branches().isEmpty)
         #expect(!f.fileManager.fileExists(atPath: f.runFile.path))

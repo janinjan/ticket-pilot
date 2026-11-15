@@ -89,8 +89,10 @@ Run `"<plugin-root>/bin/tp" run-step <id> 1`.
 3. Write the **numbered list of requests**: one request per number, each with its source (ticket description, comment, Confluence page, Figma frame…). Record it, in order, one flag per request: `"<plugin-root>/bin/tp" run-set <id> --request "<1. request — source>" --request "<2. …>"`. Record it again whenever the list changes (an answer of the user, a resume).
 4. Present to the user: a short summary, the numbered requests, the target repo, and the ambiguous points.
 5. Ask in the same message, in the user's language, whether to add the line `JIRA: <KEY>` to the commits. The line is never added without a yes.
-6. Record the wait, then wait: `"<plugin-root>/bin/tp" run-wait <id> go "<in the user's language: one-line summary + the question about the JIRA line>"`. This go is the only systematic validation of the run. Nothing else starts before it.
-7. On the go, record the answer: `"<plugin-root>/bin/tp" run-set <id> --jira-line yes` or `--jira-line no`.
+6. The test in the app at step 7: check yourself whether you can drive the app, never ask the user and never assume. MCP tools are often loaded only on demand, so look for them by what they do, not by a name: run ToolSearch with `tap screenshot device` and see whether tools that tap and take screenshots on a simulator or emulator come back (for example `mcp__mobile-mcp__…`); when unsure, `claude mcp list` shows the servers and whether they are connected. On an Android repo, `adb version` answering is enough. If you can, do not ask: say in the same message, in one line, that you will test in the app yourself at step 7 and that they need not be there. If you cannot, ask in the same message whether they run the cases with you at step 7 or leave the test to them for later, so the run goes on to the commits without it; recommend leaving it when they said they will not be there.
+7. Record the wait, then wait: `"<plugin-root>/bin/tp" run-wait <id> go "<in the user's language: one-line summary + the question about the JIRA line + the app test line or question of point 6>"`. This go is the only systematic validation of the run. Nothing else starts before it.
+8. On the go, record the answers: `"<plugin-root>/bin/tp" run-set <id> --jira-line yes` or `--jira-line no`, and `--app-test yes` or `--app-test no`: `yes` when you drive the app yourself or they chose to run it with you, `no` when they left it for later or wrote that you skip it; no answer about it: `yes`.
+9. When the user asks at the go only to test the ticket in the app (a non-regression check of what is already merged, "test only"), record `"<plugin-root>/bin/tp" run-set <id> --test-only yes` and follow Test only below.
 
 ## Step 2 — Prepare
 
@@ -133,6 +135,8 @@ Launch **six read-only exploration agents in parallel**, in a single message (fo
 If an agent finds no implementation on a platform, rerun the sync for that repo yourself (its `sync_command`, else `git -C "<repo>" fetch origin`), then search `origin/<main_branch>` again before concluding "not started".
 
 If item 6 finds a candidate branch, record it and ask ONE question, with your recommendation: `"<plugin-root>/bin/tp" run-wait <id> question "<in the user's language: is branch X (repo, last commit date) the reference for this ticket? + recommendation, yes or no and why>"`, then wait for the answer. If yes, that branch is the **primary reference**: compare against it in step 4 and reuse its logic and design rather than re-inventing them.
+
+When the research shows that every request is already on `origin/<main_branch>` (merged on the target platform), do not implement it again: say so with the proof (the commits, `path:line`) and offer to test the current main branch in the app instead, with `"<plugin-root>/bin/tp" run-wait <id> question "<in the user's language: everything is merged (proof); test it in the app instead, as a non-regression check? + recommendation>"`. On a yes, record `--test-only yes` and follow Test only. On a no, report what is merged and end the run.
 
 ## Step 4 — Compare and decide
 
@@ -182,19 +186,39 @@ Run `"<plugin-root>/bin/tp" run-step <id> 7`.
 
 This step is "not applicable" only when the change has no effect visible in the app, and the reason must cite the diff that shows it (for example "only `path:line` of the build scripts changes").
 
+When the run's `app_test` is false (the user chose at the go to test later, see `"<plugin-root>/bin/tp" run-show <id>`), the test is left to the user: check the step as "not applicable: left to the user at their request", launch nothing and ask nothing. Still write the test plan of point 6, every result ❓ (not run), and the Coverage list of point 7, so the report hands the user the plan to run; then go on to step 8. The user can still change their mind later and ask you to run it.
+
 For the whole step, apply the autonomy rule: find test data yourself by navigating the app you drive (for example an existing ad to edit under "My ads") instead of asking. Once the app runs on a device, simulator or browser that the user launched (or said is ready), never install, reinstall, rebuild or relaunch it there without an explicit yes for that exact action. A short or ambiguous reply ("ok", "done") to a question that offered several actions means ready, not permission to act. When in doubt, ask again in one sentence.
 
-1. Try to build and launch the app (simulator, emulator or browser) with the repo entry's `launch_skill`, or the repo's own launch skill if it has one.
-2. If that fails, or if there is no such skill, do not tinker: never write your own tooling to drive the app, and never ask the user to grant system permissions (accessibility, screen recording…) to make one work. When nothing available can drive the app, give the user the numbered cases of the test plan to run, with what to look at, record the wait with `"<plugin-root>/bin/tp" run-wait <id> question "<in the user's language: the cases to run and what to report>"`, and fill the results from their answers and screenshots. Ask the user to launch the app, with the toggle state you need, and wait: `"<plugin-root>/bin/tp" run-wait <id> launch_app "<in the user's language: what to launch and with which toggle state>"`.
-   - Toggles: never edit generated or shipped config files to flip a toggle. Ask the user to set it in the app's debug menu.
-3. **Proxy state**, before running the cases, when a debugging proxy is in use: list the proxy's active rules (rewrite, scripting, breakpoint, map rules) yourself, with the proxy's own CLI or export; never ask the user to confirm that no rule is active. Report every rule that alters requests or responses; ask only before disabling one, with with `"<plugin-root>/bin/tp" run-wait <id> question "<in the user's language: may I disable rule X, which alters Y? + recommendation>"` and wait for the answer. Never leave a rule you enabled active. The test plan states that real (unaltered) traffic was used, or which rule altered it.
-4. Once the app runs, drive it:
+1. Build, install and launch the app on a simulator, emulator or browser of your own (never on one the user launched, see above):
+   - with the repo entry's `launch_skill`, or the repo's own launch skill if it has one;
+   - else with the platform's standard commands, each through `"<plugin-root>/bin/tp" run-shell`:
+     - Android: when no emulator runs (`adb devices`), start one of `emulator -list-avds` with `emulator -avd <name>` and wait for it (`adb wait-for-device`, then `adb shell getprop sys.boot_completed` is `1`); install the debug variant with its Gradle install task (`./gradlew tasks --group install` lists them, for example `./gradlew :app:installDebug`); launch it with `adb shell monkey -p <applicationId> 1`;
+     - iOS: generate the project first when the repo generates it (XcodeGen, as its `CLAUDE.md` says: a new worktree has none), build the app's scheme for the simulator with the repo's build (its build skill, else `xcodebuild -scheme <app> -destination 'platform=iOS Simulator,id=<udid>' -derivedDataPath <dir> build`; the first build of a worktree is long), boot a simulator when none is booted (`xcrun simctl boot <device>`), then `xcrun simctl install booted <path to the .app>` and `xcrun simctl launch booted <bundle id>`;
+     - web: the repo's own development server command (its `package.json` scripts), then open the page.
+   What you test, whatever builds it:
+   - the app the users get, from its main scheme or target (on iOS the app's own scheme, not a framework's), never a module's demo app, unless the ticket is about that demo;
+   - built from the worktree, into a build folder inside it (`-derivedDataPath "<worktree>/dd"`), never a build made elsewhere or prebuilt modules: say in the test plan which commit the build comes from;
+   - on a test environment, never production: launch with the enabled environment variables of the app's run scheme (`_APP_ENVIRONMENT_` for example, passed with `SIMCTL_CHILD_` on iOS), and name the environment in the test plan;
+   - when a case needs a signed-in account, never ask for a password or accept one in the conversation: ask the user once to sign in themselves on your device (they see it in the simulator app), with `"<plugin-root>/bin/tp" run-wait <id> question "<in the user's language: sign in on the ticket-pilot simulator with a test account, then tell me>"`; the sign-in then stays on that device.
+   Use a device of your own, the same from one run to the next, and reinstall over it, keeping its data, rather than uninstalling: screens shown once (cookies, onboarding, a sign-in) then stay behind you.
+   - iOS: the simulator named `ticket-pilot` (`xcrun simctl list devices`); when there is none, create it once with `xcrun simctl create ticket-pilot <device type> <runtime>`, an iPhone of the runtime the repo builds for. Use never an existing simulator of the user's, booted or not: it holds their own data and sign-ins.
+   - Android: an emulator of `emulator -list-avds` that no one is using (`adb devices` shows the running ones); one the user started stays theirs.
+2. Drive the app yourself to run the cases. Keep a screenshot of what proves each result in the folder that `"<plugin-root>/bin/tp" run-shots <id>` prints, named after its case (`case-1-toggle-on.png`), and cite it in the test plan next to the result. A cookie or consent screen, an onboarding or a "what's new" screen on the way is accepted or closed without asking, unless the ticket is about it; it is not one of the cases.
+   - with a device MCP server when one is connected (mobile-mcp, for example: screenshots, element list, taps, swipes, text, on iOS and Android alike). Its tools may be loaded only on demand: look for them with ToolSearch (`tap screenshot device`) before concluding there is none;
+   - else on Android with `adb` itself: `adb exec-out screencap -p` for a screenshot, `adb shell uiautomator dump` for the elements and their positions, `adb shell input tap|swipe|text|keyevent`;
+   - else on iOS, `xcrun simctl io booted screenshot` gives screenshots but nothing can tap: give the user the cases to run (point 3), with the app already launched.
+3. If nothing builds, launches or drives the app, do not tinker: never write your own tooling to drive the app (the commands above are the platform's own, not tooling), and never ask the user to grant system permissions (accessibility, screen recording…) to make one work. When nothing available can drive the app, give the user the numbered cases of the test plan to run, with what to look at, record the wait with `"<plugin-root>/bin/tp" run-wait <id> question "<in the user's language: the cases to run and what to report>"`, and fill the results from their answers and screenshots. Ask the user to launch the app, with the toggle state you need, and wait: `"<plugin-root>/bin/tp" run-wait <id> launch_app "<in the user's language: what to launch and with which toggle state>"`.
+   - Toggles: never edit generated or shipped config files to flip a toggle. First look in the repo for how the app takes its toggles at launch, and use it when you launch the app yourself: environment variables of the run scheme (the `EnvironmentVariables` of its `.xcscheme`, for example `_TOGGLES_ON_` and `_TOGGLES_OFF_` with a comma-separated list of keys), launch arguments, or the extras of a debug intent on Android. On iOS, `xcrun simctl launch` passes them on with the `SIMCTL_CHILD_` prefix: `SIMCTL_CHILD__TOGGLES_ON_="<key>" xcrun simctl launch booted <bundle id>`. For the non-regression case, relaunch with the toggle OFF the same way (`_TOGGLES_OFF_`): the app may keep the last values between launches. Only when the app takes none at launch, set it in the app's debug menu while you drive it, or ask the user to.
+4. **Proxy state**, before running the cases, when a debugging proxy is in use: list the proxy's active rules (rewrite, scripting, breakpoint, map rules) yourself, with the proxy's own CLI or export; never ask the user to confirm that no rule is active. Read what each rule does yourself, in the proxy's own files or export; never ask the user what a rule does. When a tool refuses to read it, say so and carry on with the traffic export below. Report every rule that alters requests or responses; ask only before disabling one, with with `"<plugin-root>/bin/tp" run-wait <id> question "<in the user's language: may I disable rule X, which alters Y? + recommendation>"` and wait for the answer. Never leave a rule you enabled active. The test plan states that real (unaltered) traffic was used, or which rule altered it.
+5. Once the app runs, drive it. Before the first case, list what can change the screens of the ticket and cover it in the plan: the neighbouring toggles that change those screens (each ON and OFF, set at launch as above), the ways in and back (going back, closing without validating, reopening), and the data that changes the result (another address, region, category or size). Then run:
    - validation scenarios for each request;
    - edge cases;
    - **toggle ON, then OFF** (non-regression);
-   - network calls checked in the proxy when needed.
-5. Write the **test plan in QA format** and record each result ✅ / ❌ / ❓, following `references/test-plan-format.md`: prerequisites, numbered and titled cases (one per request, one per branch added in the diff, real data, "Proxy:" checks), complementary checks (toggle OFF identical to production, out-of-scope cases unchanged) and open questions. The plan has no code references (no file paths, `path:line`, code names or endpoint paths): it is written in plain functional language, with the case ↔ request link as "(Request N)".
-6. The plan and its results go into the final report, ready to be pasted as is into a Jira comment by the user. The traceability to the code goes in a separate **Coverage** list of the report: one line per case, case title → request number and/or diff branch (`path:line`).
+   - network calls, checked yourself: export the captured traffic with the proxy's CLI (a HAR export, for example) and read the requests and responses the cases need; a "Proxy:" check is never left ❓ for want of looking.
+   A result stays ❓ (not tested) only for what you cannot drive or reach, with the reason; everything else is run.
+6. Write the **test plan in QA format** and record each result ✅ / ❌ / ❓, following `references/test-plan-format.md`: prerequisites, numbered and titled cases (one per request, one per branch added in the diff, real data, "Proxy:" checks), complementary checks (toggle OFF identical to production, out-of-scope cases unchanged) and open questions. The plan has no code references (no file paths, `path:line`, code names or endpoint paths): it is written in plain functional language, with the case ↔ request link as "(Request N)".
+7. The plan and its results go into the final report, ready to be pasted as is into a Jira comment by the user, with the path of the screenshots folder: the user attaches its files to the comment. The traceability to the code goes in a separate **Coverage** list of the report: one line per case, case title → request number and/or diff branch (`path:line`).
 
 ## Step 8 — Review and audit
 
@@ -281,6 +305,22 @@ End the report with the command the user runs to send the branch, chosen by the 
 - `review` is `github` → `cd "<worktree>" && git push -u origin <branch>` then `gh pr create` (print them, do not run them);
 - no `review` (the app could not tell how the repo is reviewed) → give the branch and the worktree, with no command: the user sends it the way this repo is reviewed.
 
+## Test only
+
+A run whose `test_only` is true checks in the app what is already merged: no code, no branch, no commit.
+
+1. Step 2: sync as usual, then make a worktree detached at the remote main branch, with no branch of its own: `git -C "<repo>" worktree add --detach "<repo-path>-worktrees/<slug>-check" origin/<main_branch>`, and record it with `"<plugin-root>/bin/tp" run-set <id> --worktree "<worktree>"` (no `--branch`). Note the base commit as usual.
+2. Step 3 as far as needed to know what to check: the toggle, the expected behaviour of each request, the cases the other platforms cover.
+3. Steps 4, 5, 6, 8 and 9: start each with `run-step` and check it as "not applicable: test only".
+4. Step 7 in full on that worktree, whatever `app_test` says: the test is the point of the run. Toggle ON for each request and its edge cases, then OFF (production unchanged).
+5. Step 10: the report holds the requests, the test plan with every result and its screenshots, and the Coverage list pointing at the merged code (`path:line` on `origin/<main_branch>`); no split, no commits and no command to send a branch.
+6. The worktree goes with "Remove worktree…" in the menu bar app, as for any run.
+
+Switching, in the same run (a run of the same ticket and repo cannot be started twice):
+- **Into test only, at any step**, when the user asks for it after the go: record `--test-only yes`. When this run made a branch that has no commit of its own yet, drop it: `git -C "<worktree>" switch --detach origin/<main_branch>`, `git -C "<repo>" branch -D <branch>`, `"<plugin-root>/bin/tp" run-set <id> --branch ""`. Check the steps left before 7 as "not applicable: test only" and go on with step 7.
+- **A regression found**: report it with its proof and ask whether to fix it. On a yes it is fixed in this same run: record `--test-only no`, make the branch in the worktree (`git -C "<worktree>" switch -c <slug>`), record `--branch <slug>`, and go on from step 4 as a normal run, through steps 5 to 10. On a no, it stays a regression in the report.
+- **When the user gives up the fix** after that: drop the branch as above (its commits go with it: say so first, with their list, and wait for a yes), record `--test-only yes`, and write the report again as a test-only report.
+
 ## After the report
 
 The user often reacts to the report: a naming, a test result to correct, a line to remove. A remark that only corrects the report (a wording of the test plan, a ❓ the user answers) → fix the report and save it again with `run-report`, nothing else. A remark that changes the code or the commits reopens the run; never patch it outside the steps:
@@ -291,6 +331,8 @@ The user often reacts to the report: a naming, a test result to correct, a line 
 4. Step 8 again, **reviewer and auditor** on the new full diff: a rename or a removal can leave dead code or a name that no longer fits.
 5. Step 9 again: each change as a fixup into the commit it belongs to, the whole chain verified, the reviewer on every rewritten commit.
 6. Step 10 again: what changed since the last report, saved with `run-report` as the full updated report, then `"<plugin-root>/bin/tp" run-done <id>`.
+
+When the test in the app was left to the user (`app_test` false) and they now ask you to run it: record `"<plugin-root>/bin/tp" run-set <id> --app-test yes`, run step 7 in full (`"<plugin-root>/bin/tp" run-step <id> 7`, the app launched as that step says), on the branch as it is. Replace the ❓ of the test plan with the results, save the full report again with `run-report`, then `"<plugin-root>/bin/tp" run-done <id>`. A case that fails is a remark that changes the code: reopen the run as above, from step 5.
 
 ## Resume
 

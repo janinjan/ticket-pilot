@@ -107,6 +107,35 @@ class StartSkillTests(unittest.TestCase):
         self.assertNotEqual(commit, -1, "step 9 must show the commit command")
         self.assertLess(size, commit)
 
+    def test_the_app_test_can_be_left_to_the_user(self):
+        text = skill()
+        go = step_sections(text)[1]
+        self.assertIn("--app-test yes", go)
+        self.assertIn("--app-test no", go)
+        # Whether it can drive the app is checked, never asked.
+        self.assertIn("never ask the user", go)
+        self.assertIn("ToolSearch", go)
+        self.assertIn("by what they do, not by a name", go)
+        app_test = step_sections(text)[7]
+        self.assertIn("`app_test` is false", app_test)
+        self.assertIn("left to the user", app_test)
+        after = text[text.index("## After the report"):text.index("## Resume")]
+        self.assertIn("--app-test yes", after)
+
+    def test_a_merged_ticket_can_be_tested_in_the_app_only(self):
+        text = skill()
+        self.assertIn("--test-only yes", step_sections(text)[1])
+        self.assertIn("already on `origin/<main_branch>`", step_sections(text)[3])
+        only = text[text.index("## Test only"):text.index("## After the report")]
+        self.assertIn("worktree add --detach", only)
+        self.assertIn('not applicable: test only', only)
+        self.assertIn("no command to send a branch", only)
+        # Switching both ways, at any step, in the same run.
+        self.assertIn("at any step", only)
+        self.assertIn("fixed in this same run", only)
+        self.assertIn("--test-only no", only)
+        self.assertIn("gives up the fix", only)
+
     def test_jira_line_only_when_validated(self):
         text = skill()
         self.assertIn("--jira-line", text)
@@ -236,6 +265,44 @@ class StartSkillTests(unittest.TestCase):
         self.assertIn("means ready, not permission", whole_step)
         self.assertIn("debug menu", section)
         self.assertIn("never edit generated or shipped config files", section)
+
+    def test_app_test_uses_the_platform_commands_without_a_launch_skill(self):
+        section = step_sections(skill())[7]
+        for command in ("./gradlew", "adb", "emulator -avd", "xcrun simctl install", "xcrun simctl launch"):
+            self.assertIn(command, section)
+        # Driving needs a device server on iOS: simctl cannot tap.
+        self.assertIn("mobile-mcp", section)
+        self.assertIn("never ask the user to grant system permissions", section)
+
+    def test_toggles_are_set_at_launch_when_the_app_reads_them(self):
+        section = step_sections(skill())[7]
+        self.assertIn("SIMCTL_CHILD_", section)
+        self.assertIn(".xcscheme", section)
+        self.assertIn("relaunch with the toggle OFF", section)
+
+    def test_app_test_accepts_consent_screens_and_keeps_its_simulator(self):
+        section = step_sections(skill())[7]
+        self.assertIn("cookie or consent screen", section)
+        self.assertIn("unless the ticket is about it", section)
+        self.assertIn("reinstall over it, keeping its data", section)
+        self.assertIn("xcrun simctl create ticket-pilot", section)
+        self.assertIn("never an existing simulator of the user's, booted or not", section)
+        self.assertIn('bin/tp" run-shots <id>', section)
+
+    def test_app_test_runs_the_shipped_app_built_from_the_worktree(self):
+        section = step_sections(skill())[7]
+        self.assertIn("never a module's demo app", section)
+        self.assertIn("never production", section)
+        self.assertIn("never ask for a password", section)
+        self.assertIn("built from the worktree", section)
+
+    def test_app_test_checks_the_network_itself_and_covers_neighbours(self):
+        section = step_sections(skill())[7]
+        self.assertIn("export the captured traffic", section)
+        self.assertIn("never ask the user what a rule does", section)
+        self.assertIn("neighbouring toggles", section)
+        self.assertIn("going back", section)
+        self.assertIn("only for what you cannot drive", section)
 
     def test_app_test_checks_the_proxy_rules(self):
         section = step_sections(skill())[7]

@@ -107,6 +107,10 @@ def start(key: str, repo: str, repo_path: str) -> dict:
         "waiting": None,
         "language": None,
         "jira_line": None,
+        # Whether step 7 tests in the app (true) or leaves it to the user (false); asked at the go.
+        "app_test": None,
+        # True for a run that only tests in the app what is already merged: no branch, no commit.
+        "test_only": False,
         "requests": [],
         "history": [{"step": 1, "started_at": now}],
         "created_at": now,
@@ -154,6 +158,16 @@ def set_done(run_identifier: str) -> dict:
 def report_path(run_identifier: str):
     """Where the final report of a run is kept, next to its state, for the menu bar app to open."""
     return paths.runs_dir() / ("%s.report.md" % run_identifier)
+
+
+def screenshots_dir(run_identifier: str):
+    """Where step 7 keeps the screenshots of a run, next to its report; made on demand, readable by the
+    user only. Releasing the run deletes it with the report."""
+    _require(run_identifier)
+    folder = paths.runs_dir() / ("%s.screenshots" % run_identifier)
+    folder.mkdir(mode=0o700, exist_ok=True)
+    os.chmod(folder, 0o700)
+    return folder
 
 
 def save_report(run_identifier: str, text: str) -> None:

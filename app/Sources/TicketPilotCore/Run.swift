@@ -67,6 +67,8 @@ public struct Run: Decodable, Equatable, Sendable, Identifiable {
     public var repoPath: String
     public var worktree: String?
     public var branch: String?
+    /// A run that only tested in the app what is already merged (`run-set --test-only`): no code to review.
+    public var testOnly = false
     public var sessionID: String?
     public var session: SessionInfo?
     public var step: Int
@@ -78,6 +80,7 @@ public struct Run: Decodable, Equatable, Sendable, Identifiable {
 
     private enum CodingKeys: String, CodingKey {
         case id, key, title, repo, worktree, branch, session, step, waiting, history, status
+        case testOnly = "test_only"
         case repoPath = "repo_path"
         case sessionID = "session_id"
         case stepName = "step_name"
@@ -114,6 +117,7 @@ public struct Run: Decodable, Equatable, Sendable, Identifiable {
         repoPath = try container.decode(String.self, forKey: .repoPath)
         worktree = try container.decodeIfPresent(String.self, forKey: .worktree)
         branch = try container.decodeIfPresent(String.self, forKey: .branch)
+        testOnly = (try? container.decodeIfPresent(Bool.self, forKey: .testOnly)) ?? false
         sessionID = try container.decodeIfPresent(String.self, forKey: .sessionID)
         session = try? container.decodeIfPresent(SessionInfo.self, forKey: .session)
         step = try container.decode(Int.self, forKey: .step)

@@ -204,6 +204,14 @@ class RunsCliTests(RunsTestCase):
         run = runs.load("ABC-1--app")
         self.assertEqual(run["branch"], "b")
         self.assertIs(run["jira_line"], False)
+        # Whether the app is tested in step 7: asked at the go, kept for a resume.
+        self.assertIsNone(run["app_test"])
+        self.assertEqual(self.run_cli("run-set", "ABC-1--app", "--app-test", "no")[0], 0)
+        self.assertIs(runs.load("ABC-1--app")["app_test"], False)
+        # A run that only tests what is already merged.
+        self.assertIs(runs.load("ABC-1--app")["test_only"], False)
+        self.assertEqual(self.run_cli("run-set", "ABC-1--app", "--test-only", "yes")[0], 0)
+        self.assertIs(runs.load("ABC-1--app")["test_only"], True)
         self.assertEqual(self.run_cli("run-done", "ABC-1--app")[0], 0)
         self.assertEqual(runs.load("ABC-1--app")["status"], "done")
 
@@ -216,6 +224,16 @@ class RunsCliTests(RunsTestCase):
         self.assertEqual(out.strip(), str(path))
         self.assertEqual(path.read_text(encoding="utf-8"), "# Report\n\nDone.\n")
         self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+
+    def test_cli_run_shots_gives_the_folder_of_the_screenshots(self):
+        self.run_cli("run-start", "ABC-1", "app", "/tmp/app")
+        code, out, _ = self.run_cli("run-shots", "ABC-1--app")
+        self.assertEqual(code, 0)
+        folder = paths.runs_dir() / "ABC-1--app.screenshots"
+        self.assertEqual(out.strip(), str(folder))
+        self.assertTrue(folder.is_dir())
+        self.assertEqual(os.stat(folder).st_mode & 0o777, 0o700)
+        self.assertEqual(self.run_cli("run-shots", "XYZ-9--app")[0], 2)
 
     def test_cli_run_report_refuses_an_empty_report(self):
         self.run_cli("run-start", "ABC-1", "app", "/tmp/app")

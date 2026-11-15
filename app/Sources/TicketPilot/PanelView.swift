@@ -227,7 +227,9 @@ struct PanelView: View {
     /// Under the card's text: "Review in <git client>" for a finished run on the left, the session button on
     /// the right.
     private func actionRow(_ line: RunLine) -> some View {
-        let gitClient = line.section == .reportReady && model.hasWorktree(runID: line.runID) ? model.gitClient : nil
+        // A test-only run has no commit to review.
+        let gitClient = line.section == .reportReady && model.hasWorktree(runID: line.runID) && !model.isTestOnly(runID: line.runID)
+            ? model.gitClient : nil
         return HStack(spacing: 6) {
             if let gitClient {
                 Button(action: closing { model.reviewInGitClient(runID: line.runID) }) {

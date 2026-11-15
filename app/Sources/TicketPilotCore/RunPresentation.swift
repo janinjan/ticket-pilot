@@ -94,6 +94,8 @@ public struct RunLine: Equatable, Sendable {
             detail = "Step \(run.step) of \(stepCount) · " + stepLabel(run.stepName) + " · " + duration(stepMinutes)
         case .reportReady:
             detail = switch commits {
+            // Only tested in the app what is merged: a test report, nothing to review.
+            case _ where run.testOnly: "Test report ready · no code change"
             // Stopped before step 2 (the ticket was already done): a report, no branch.
             case nil where run.worktree == nil: "Report ready · no code change"
             case nil: "Ready for review"

@@ -133,6 +133,10 @@ import Testing
         var noWorktree = run
         noWorktree.worktree = nil
         #expect(RunLine.make(noWorktree, now: Self.now, stuckMinutes: [:]).detail == "Report ready · no code change")
+        // A run that only tested what is merged has nothing to review either.
+        var testOnly = run
+        testOnly.testOnly = true
+        #expect(RunLine.make(testOnly, now: Self.now, stuckMinutes: [:], commits: 0).detail == "Test report ready · no code change")
         // A finished run gives no time: it no longer matters.
         #expect(line.context == "iOS")
         let titled = RunLine.make(run, now: Self.now, stuckMinutes: [:], summary: "Show the distance", jiraStatus: "Backlog")

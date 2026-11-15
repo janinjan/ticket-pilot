@@ -77,6 +77,13 @@ def cmd_run_report(args: argparse.Namespace) -> int:
     return code
 
 
+def cmd_run_shots(args: argparse.Namespace) -> int:
+    if runs.load(args.run_id) is None:
+        return _fail("unknown run: %s" % args.run_id)
+    print(runs.screenshots_dir(args.run_id))
+    return 0
+
+
 def cmd_run_show(args: argparse.Namespace) -> int:
     run = runs.load(args.run_id)
     if run is None:
@@ -159,6 +166,10 @@ def cmd_run_set(args: argparse.Namespace) -> int:
         fields["branch"] = args.branch
     if args.jira_line is not None:
         fields["jira_line"] = args.jira_line == "yes"
+    if args.app_test is not None:
+        fields["app_test"] = args.app_test == "yes"
+    if args.test_only is not None:
+        fields["test_only"] = args.test_only == "yes"
     if args.request is not None:
         fields["requests"] = args.request
     if args.title is not None:
@@ -168,7 +179,7 @@ def cmd_run_set(args: argparse.Namespace) -> int:
             return _fail("invalid language: %r (expected %s, for example fr or en-GB)" % (args.language, runs.LANGUAGE_PATTERN))
         fields["language"] = args.language
     if not fields:
-        return _fail("run-set needs at least one of --worktree, --branch, --jira-line, --request, --title, --language")
+        return _fail("run-set needs at least one of --worktree, --branch, --jira-line, --app-test, --test-only, --request, --title, --language")
     return _with_run(args, lambda: runs.update(args.run_id, **fields))
 
 
@@ -248,6 +259,10 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("run_id")
     report.set_defaults(func=cmd_run_report)
 
+    shots = subparsers.add_parser("run-shots", help="print the folder for the run's screenshots (made if needed)")
+    shots.add_argument("run_id")
+    shots.set_defaults(func=cmd_run_shots)
+
     show = subparsers.add_parser("run-show", help="print a run as JSON")
     show.add_argument("run_id")
     show.set_defaults(func=cmd_run_show)
@@ -267,11 +282,13 @@ def build_parser() -> argparse.ArgumentParser:
     listing = subparsers.add_parser("run-list", help="print one line per stored run")
     listing.set_defaults(func=cmd_run_list)
 
-    update = subparsers.add_parser("run-set", help="set worktree, branch, jira-line, requests or title")
+    update = subparsers.add_parser("run-set", help="set worktree, branch, jira-line, app-test, requests or title")
     update.add_argument("run_id")
     update.add_argument("--worktree")
     update.add_argument("--branch")
     update.add_argument("--jira-line", choices=["yes", "no"])
+    update.add_argument("--app-test", choices=["yes", "no"], help="test in the app at step 7, or leave it to the user")
+    update.add_argument("--test-only", choices=["yes", "no"], help="only test in the app what is already merged")
     update.add_argument(
         "--request", action="append",
         help="one numbered request, in order; repeat it for each one (replaces the stored list)",

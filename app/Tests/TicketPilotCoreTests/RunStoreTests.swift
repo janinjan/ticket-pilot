@@ -10,7 +10,7 @@ import Testing
       "session": {"state": "running", "last_notification": null, "notified_at": null},
       "step": 6, "step_name": "verify", "status": "waiting",
       "waiting": {"kind": "question", "text": "Which one?", "since": "2026-11-11T10:05:00Z"},
-      "jira_line": null, "requests": [],
+      "jira_line": null, "test_only": true, "requests": [],
       "history": [
         {"step": 5, "started_at": "2026-11-11T09:00:00Z", "ended_at": "2026-11-11T10:00:00Z"},
         {"step": 6, "started_at": "2026-11-11T10:00:00Z"}
@@ -39,11 +39,13 @@ import Testing
         #expect(run.session?.state == "running")
         #expect(run.step == 6)
         #expect(run.title == "Show the distance")
+        #expect(run.testOnly)
     }
 
     @Test func test_decodesRunFromOlderPlugin() throws {
         let run = try JSONDecoder.runDecoder.decode(Run.self, from: Data(Self.olderRun.utf8))
         #expect(run.session == nil)
+        #expect(!run.testOnly)
         #expect(run.waiting?.kind == "input")
         #expect(run.history.isEmpty)
         #expect(run.status == .unknown)

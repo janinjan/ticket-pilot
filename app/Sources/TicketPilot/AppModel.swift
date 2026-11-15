@@ -501,6 +501,10 @@ final class AppModel {
         runs.first { $0.id == runID }.map(Releasable.actionTitle(for:))
     }
 
+    func isTestOnly(runID: String) -> Bool {
+        runs.first { $0.id == runID }?.testOnly == true
+    }
+
     func hasWorktree(runID: String) -> Bool {
         runs.first { $0.id == runID }?.worktree != nil
     }

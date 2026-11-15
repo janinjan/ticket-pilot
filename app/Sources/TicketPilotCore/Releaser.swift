@@ -159,9 +159,11 @@ public struct Releaser: Sendable {
             }
         }
         do {
-            let report = plan.runFile.deletingPathExtension().appendingPathExtension("report.md")
-            if FileManager.default.fileExists(atPath: report.path) {
-                try FileManager.default.removeItem(at: report)
+            let base = plan.runFile.deletingPathExtension()
+            // The report and the screenshots of step 7, kept next to the run file.
+            for companion in [base.appendingPathExtension("report.md"), base.appendingPathExtension("screenshots")]
+            where FileManager.default.fileExists(atPath: companion.path) {
+                try FileManager.default.removeItem(at: companion)
             }
             try FileManager.default.removeItem(at: plan.runFile)
         } catch {
