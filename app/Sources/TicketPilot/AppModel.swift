@@ -111,7 +111,7 @@ final class AppModel {
     /// What the empty list says ("No tickets assigned to you"), once Jira answered.
     var emptyListText: String? {
         PanelStatus.emptyListText(
-            hasRuns: !runs.isEmpty, todoCount: jiraAnswered ? todo.ready.count + todo.backlog.count : nil
+            hasRuns: !runs.isEmpty, todoCount: jiraAnswered ? todo.count : nil
         )
     }
 
@@ -428,10 +428,11 @@ final class AppModel {
         }
     }
 
-    /// The tickets to do, without those that already have a run not done.
+    /// The tickets in progress and to do, without those that have a run.
     private func rebuildTodo() {
         todo = TodoList(
-            issues: issues, readyStatuses: config?.readyStatuses ?? [], keysWithRuns: TodoList.keysWithRuns(runs)
+            issues: issues, readyStatuses: config?.readyStatuses ?? [], finishedStatuses: config?.finishedStatuses ?? [],
+            keysWithRuns: TodoList.keysWithRuns(runs)
         )
     }
 

@@ -7,16 +7,51 @@ private func issue(_ key: String, status: String, category: JiraIssue.StatusCate
 }
 
 @Suite(.timeLimit(.minutes(1))) struct TodoListTests {
-    @Test func test_todoListKeepsToDoCategoryOnly() {
+    @Test func test_ticketsInProgressHaveTheirOwnList() {
         let list = TodoList(
             issues: [
                 issue("ABC-1", status: "To Start", category: .toDo),
                 issue("ABC-2", status: "In Progress", category: .inProgress),
+                issue("ABC-3", status: "Done", category: .done),
             ],
             readyStatuses: ["To Start"]
         )
 
         #expect((list.ready + list.backlog).map(\.key) == ["ABC-1"])
+        #expect(list.inProgress.map(\.key) == ["ABC-2"])
+        #expect(list.count == 2)
+    }
+
+    /// A ticket in progress whose run was released stays in sight; one with a run is its card.
+    @Test func test_aTicketInProgressWithARunIsLeftOut() {
+        let list = TodoList(
+            issues: [issue("ABC-1", status: "En cours", category: .inProgress), issue("ABC-2", status: "En cours", category: .inProgress)],
+            readyStatuses: [],
+            keysWithRuns: ["ABC-1"]
+        )
+        #expect(list.inProgress.map(\.key) == ["ABC-2"])
+    }
+
+    /// Some workflows keep a finished ticket in Jira's "in progress" category ("To Deliver"): not listed.
+    @Test func test_finishedStatusesAreLeftOutOfInProgress() {
+        let list = TodoList(
+            issues: [issue("ABC-1", status: "En cours", category: .inProgress), issue("ABC-2", status: "to deliver", category: .inProgress)],
+            readyStatuses: [],
+            finishedStatuses: ["To Deliver"]
+        )
+        #expect(list.inProgress.map(\.key) == ["ABC-1"])
+    }
+
+    @Test func test_inProgressComesBeforeTheTicketsToDo() {
+        let ongoing = issue("ABC-1", status: "En cours", category: .inProgress)
+        let ready = issue("ABC-2", status: "To Start", category: .toDo)
+        let backlog = issue("ABC-3", status: "Backlog", category: .toDo)
+        func titles(_ issues: [JiraIssue]) -> [String] {
+            TodoList(issues: issues, readyStatuses: ["To Start"]).sections.map(\.title)
+        }
+        #expect(titles([ready, ongoing]) == ["In progress", "To do"])
+        #expect(titles([backlog, ready, ongoing]) == ["In progress", "Ready to start", "Backlog"])
+        #expect(titles([ongoing]) == ["In progress"])
     }
 
     @Test func test_readyStatusesGoFirst() {

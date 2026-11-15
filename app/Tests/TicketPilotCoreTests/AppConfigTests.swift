@@ -56,6 +56,7 @@ struct AppConfigTests {
         let config = try AppConfig.load(from: url)
         #expect(config.pollMinutes == 5)
         #expect(config.readyStatuses == ["To Start"])
+        #expect(config.finishedStatuses == ["To Deliver"])
         #expect(config.terminalApp == nil)
         #expect(config.gitClient == nil)
         #expect(config.permissionMode == nil)
@@ -66,12 +67,13 @@ struct AppConfigTests {
         let overridden = try AppConfig.load(from: writeTemp("""
         {"jira": {"site": "https://example.atlassian.net", "email": "a@example.com",
                   "keychain_service": "svc"},
-         "repos": [], "poll_minutes": 2, "ready_statuses": ["Ready"],
+         "repos": [], "poll_minutes": 2, "ready_statuses": ["Ready"], "finished_statuses": [],
          "terminal_app": "iTerm", "permission_mode": "plan",
          "stuck_minutes": {"app_test": 90, "plan": 30}}
         """))
         #expect(overridden.pollMinutes == 2)
         #expect(overridden.readyStatuses == ["Ready"])
+        #expect(overridden.finishedStatuses == [])
         #expect(overridden.terminalApp == "iTerm")
         #expect(overridden.permissionMode == "plan")
         #expect(overridden.stuckMinutes == ["app_test": 90, "plan": 30])

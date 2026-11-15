@@ -93,6 +93,9 @@ public struct AppConfig: Decodable, Sendable {
     public var repos: [RepoConfig]
     public var pollMinutes: Int
     public var readyStatuses: [String]
+    /// Jira statuses of Jira's "in progress" category that mean the work is finished ("To Deliver"):
+    /// such a ticket is not listed as in progress.
+    public var finishedStatuses: [String]
     public var terminalApp: String?
     /// The git client a finished run is reviewed in; else the first known one installed.
     public var gitClient: String?
@@ -103,6 +106,7 @@ public struct AppConfig: Decodable, Sendable {
         case jira, repos
         case pollMinutes = "poll_minutes"
         case readyStatuses = "ready_statuses"
+        case finishedStatuses = "finished_statuses"
         case terminalApp = "terminal_app"
         case gitClient = "git_client"
         case permissionMode = "permission_mode"
@@ -115,6 +119,7 @@ public struct AppConfig: Decodable, Sendable {
         repos = try container.decode([RepoConfig].self, forKey: .repos)
         pollMinutes = try container.decodeIfPresent(Int.self, forKey: .pollMinutes) ?? 5
         readyStatuses = try container.decodeIfPresent([String].self, forKey: .readyStatuses) ?? ["To Start"]
+        finishedStatuses = try container.decodeIfPresent([String].self, forKey: .finishedStatuses) ?? ["To Deliver"]
         terminalApp = try container.decodeIfPresent(String.self, forKey: .terminalApp)
         gitClient = try container.decodeIfPresent(String.self, forKey: .gitClient)
         permissionMode = try container.decodeIfPresent(String.self, forKey: .permissionMode)
