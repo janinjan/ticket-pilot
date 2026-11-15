@@ -9,10 +9,12 @@ final class AuxiliaryWindow {
     func show<Content: View>(title: String, resizable: Bool = false, content: () -> Content) {
         if window == nil {
             let controller = NSHostingController(rootView: content())
-            controller.sizingOptions = [.preferredContentSize]
             let window = ClosableWindow(contentViewController: controller)
             window.title = title
             window.styleMask = resizable ? [.titled, .closable, .resizable] : [.titled, .closable]
+            // Sized once here: letting the controller resize the window to its content (`.preferredContentSize`)
+            // loops the About window's layout until AppKit stops the app, in a build made with the macOS 26 SDK.
+            window.setContentSize(controller.view.fittingSize)
             window.isReleasedWhenClosed = false
             window.center()
             self.window = window
