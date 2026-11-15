@@ -262,12 +262,12 @@ struct PanelView: View {
                     Button(finderTitle, action: closing { model.revealWorktree(runID: line.runID) })
                         .accessibilityLabel("\(finderTitle), \(line.name)")
                 }
-                if releasable {
+                if releasable, let title = model.releaseTitle(runID: line.runID) {
                     Divider()
                     Button(action: closing { model.release(runID: line.runID) }) {
-                        Label("Remove worktree…", systemImage: "arrow.triangle.branch")
+                        Label(title, systemImage: model.hasWorktree(runID: line.runID) ? "arrow.triangle.branch" : "xmark.circle")
                     }
-                    .accessibilityLabel("Remove the worktree of \(line.name)")
+                    .accessibilityLabel("\(title.dropLast()) \(line.name)")
                 }
             } label: {
                 Image(systemName: "ellipsis")

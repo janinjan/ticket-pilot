@@ -28,7 +28,7 @@ enum Alerts {
     /// Lists what releasing will delete; true when the user chose Delete.
     static func confirmRelease(_ run: Run, plan: ReleasePlan) -> Bool {
         let alert = NSAlert()
-        alert.messageText = "Remove the worktree of \(run.key) · \(run.repo)?"
+        alert.messageText = plan.question
         alert.informativeText = "This deletes:\n" + plan.lines.joined(separator: "\n")
         alert.addButton(withTitle: "Delete")
         alert.addButton(withTitle: "Cancel")

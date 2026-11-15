@@ -123,11 +123,16 @@ import Testing
     @Test func test_reportReadyLineSaysSoWithoutATime() {
         var run = Self.run(status: .done, startedMinutesAgo: nil)
         run.updatedAt = Self.now.addingTimeInterval(-36 * 60)
+        run.worktree = "/r/app-worktrees/feature"
         let line = RunLine.make(run, now: Self.now, stuckMinutes: [:])
         #expect(line.section == .reportReady)
         #expect(line.detail == "Ready for review")
         #expect(RunLine.make(run, now: Self.now, stuckMinutes: [:], commits: 1).detail == "1 commit ready for review")
         #expect(RunLine.make(run, now: Self.now, stuckMinutes: [:], commits: 4).detail == "4 commits ready for review")
+        // A run stopped before its worktree (the ticket was already done) has nothing to review.
+        var noWorktree = run
+        noWorktree.worktree = nil
+        #expect(RunLine.make(noWorktree, now: Self.now, stuckMinutes: [:]).detail == "Report ready · no code change")
         // A finished run gives no time: it no longer matters.
         #expect(line.context == "iOS")
         let titled = RunLine.make(run, now: Self.now, stuckMinutes: [:], summary: "Show the distance", jiraStatus: "Backlog")

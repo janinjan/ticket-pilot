@@ -84,6 +84,20 @@ import Testing
         ])
     }
 
+    /// A run stopped before its worktree (the ticket was already done) has only its run file to remove:
+    /// the action says so instead of "Remove worktree".
+    @Test func test_theActionIsNamedAfterWhatGoes() throws {
+        let f = try makeFixture()
+        defer { f.cleanUp() }
+        #expect(Releasable.actionTitle(for: f.run) == "Remove worktree…")
+        #expect(ReleasePlan.make(run: f.run, runsDirectory: f.runsDirectory).question == "Remove the worktree of ABC-1 · ios?")
+        var noWorktree = f.run
+        noWorktree.worktree = nil
+        noWorktree.branch = nil
+        #expect(Releasable.actionTitle(for: noWorktree) == "Remove from the list…")
+        #expect(ReleasePlan.make(run: noWorktree, runsDirectory: f.runsDirectory).question == "Remove ABC-1 · ios from the list?")
+    }
+
     @Test func test_releasesWorktreeBranchRunFileAndReport() throws {
         let f = try makeFixture()
         defer { f.cleanUp() }
@@ -115,6 +129,80 @@ import Testing
         }
         #expect(f.fileManager.fileExists(atPath: f.worktree.path))
         #expect(!(try f.branches().isEmpty))
+        #expect(f.fileManager.fileExists(atPath: f.runFile.path))
+    }
+
+    /// `git worktree remove` that fails half way (files in use, here a folder it can't empty) still forgets
+    /// the worktree: the folder left behind is no longer one, and the retry must finish the job.
+    @Test func test_releaseCanBeRetriedAfterGitLeftPartOfTheWorktree() throws {
+        let f = try makeFixture()
+        defer {
+            _ = try? SystemProcessRunner().run("/bin/chmod", ["-R", "u+w", f.root.path], currentDirectory: nil)
+            f.cleanUp()
+        }
+        try Data("build/\n".utf8).write(to: f.repo.appendingPathComponent(".git/info/exclude"))
+        let locked = f.worktree.appendingPathComponent("build/locked")
+        try FileManager.default.createDirectory(at: locked, withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: locked.appendingPathComponent("output"))
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: locked.path)
+        let plan = ReleasePlan.make(run: f.run, runsDirectory: f.runsDirectory)
+        let releaser = Releaser(runner: SystemProcessRunner())
+        do {
+            try releaser.release(plan)
+            Issue.record("expected failure")
+        } catch {
+            guard case let .worktreeNotRemoved(message) = error else {
+                Issue.record("unexpected error \(error)")
+                return
+            }
+            #expect(message.hasSuffix(ReleaseError.retryHint))
+        }
+        // Git already forgot it, the folder is still there.
+        #expect(f.fileManager.fileExists(atPath: f.worktree.path))
+        #expect(!(try f.git(["worktree", "list"]).output.contains(f.worktree.path)))
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path)
+        try releaser.release(plan)
+        #expect(!f.fileManager.fileExists(atPath: f.worktree.path))
+        #expect(try f.branches().isEmpty)
+        #expect(!f.fileManager.fileExists(atPath: f.runFile.path))
+    }
+
+    /// Git may delete the leftover's `.git` before the file it could not delete: the failed release
+    /// remembers the folder, so the retry still finishes.
+    @Test func test_retryFinishesEvenWhenGitDeletedTheLeftoversLink() throws {
+        let f = try makeFixture()
+        defer {
+            _ = try? SystemProcessRunner().run("/bin/chmod", ["-R", "u+w", f.root.path], currentDirectory: nil)
+            f.cleanUp()
+        }
+        try Data("build/\n".utf8).write(to: f.repo.appendingPathComponent(".git/info/exclude"))
+        let locked = f.worktree.appendingPathComponent("build/locked")
+        try FileManager.default.createDirectory(at: locked, withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: locked.appendingPathComponent("output"))
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: locked.path)
+        let plan = ReleasePlan.make(run: f.run, runsDirectory: f.runsDirectory)
+        let releaser = Releaser(runner: SystemProcessRunner())
+        #expect(throws: ReleaseError.self) { try releaser.release(plan) }
+        try? FileManager.default.removeItem(at: f.worktree.appendingPathComponent(".git"))
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path)
+        try releaser.release(plan)
+        #expect(!f.fileManager.fileExists(atPath: f.worktree.path))
+        #expect(!f.fileManager.fileExists(atPath: f.runFile.path))
+        let leftovers = try FileManager.default.contentsOfDirectory(atPath: f.runsDirectory.path)
+        #expect(leftovers.isEmpty)
+    }
+
+    @Test func test_aFolderThatIsNoWorktreeLeftoverIsKept() throws {
+        let f = try makeFixture()
+        defer { f.cleanUp() }
+        try f.git(["worktree", "remove", "--", f.worktree.path])
+        try FileManager.default.createDirectory(at: f.worktree, withIntermediateDirectories: true)
+        try Data("mine".utf8).write(to: f.worktree.appendingPathComponent("notes.txt"))
+        let plan = ReleasePlan.make(run: f.run, runsDirectory: f.runsDirectory)
+        #expect(throws: ReleaseError.self) { try Releaser(runner: SystemProcessRunner()).release(plan) }
+        #expect(f.fileManager.fileExists(atPath: f.worktree.appendingPathComponent("notes.txt").path))
         #expect(f.fileManager.fileExists(atPath: f.runFile.path))
     }
 

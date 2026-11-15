@@ -349,7 +349,12 @@ public struct Doctor: Sendable {
         guard let claudePath else {
             return HealthCheck(id: .mcp, ok: false, detail: "claude not found")
         }
-        guard let result = try? runner.run(claudePath, ["mcp", "list"], currentDirectory: nil), result.status == 0 else {
+        // An app opened from the Finder has no shell PATH: a server started with `npx` or `uvx` would fail to
+        // connect here while it works in the terminal. The usual tool folders come first.
+        let folders = [home.appendingPathComponent(".local/bin").path, "/opt/homebrew/bin", "/usr/local/bin"]
+            + ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+        let arguments = ["PATH=" + folders.joined(separator: ":"), claudePath, "mcp", "list"]
+        guard let result = try? runner.run("/usr/bin/env", arguments, currentDirectory: nil), result.status == 0 else {
             return HealthCheck(id: .mcp, ok: false, detail: "could not list the MCP servers")
         }
         var concerned: [String] = []

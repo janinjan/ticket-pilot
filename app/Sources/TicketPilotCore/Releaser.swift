@@ -10,6 +10,8 @@ public struct ReleasePlan: Equatable, Sendable {
     public var runFile: URL
     public var mainBranch: String?
     public var lines: [String]
+    /// The confirmation's question, named after what goes: the worktree, or only the run's card.
+    public var question: String
 
     /// `checkedOutBranch` is the branch checked out in the run's worktree (`Releaser.checkedOutBranch`), when
     /// the work went on there after the run.
@@ -26,14 +28,23 @@ public struct ReleasePlan: Equatable, Sendable {
         if let worktree = run.worktree { lines.append("Worktree: \(worktree)") }
         lines += branches.map { "Local branch: \($0)" }
         lines.append("Run state: \(runFile.path)")
+        let question = run.worktree == nil
+            ? "Remove \(run.key) · \(run.repo) from the list?"
+            : "Remove the worktree of \(run.key) · \(run.repo)?"
         return ReleasePlan(
             runID: run.id, repoPath: run.repoPath, worktree: run.worktree, branches: branches,
-            runFile: runFile, mainBranch: mainBranch, lines: lines
+            runFile: runFile, mainBranch: mainBranch, lines: lines, question: question
         )
     }
 }
 
 public enum Releasable {
+    /// The card's menu item: "Remove worktree…", or "Remove from the list…" for a run that never had one
+    /// (stopped before step 2, for a ticket already done).
+    public static func actionTitle(for run: Run) -> String {
+        run.worktree == nil ? "Remove from the list…" : "Remove worktree…"
+    }
+
     /// Runs that are finished, or whose ticket is Done in Jira (a run left before its end).
     public static func runIDs(runs: [Run], categories: [String: JiraIssue.StatusCategory]) -> Set<String> {
         Set(runs.filter { $0.status == .done || categories[$0.key] == .done }.map(\.id))
@@ -61,6 +72,10 @@ public struct AlertText: Equatable, Sendable {
 }
 
 extension ReleaseError {
+    /// After a worktree only partly deleted: what to do so the next try ends it.
+    static let retryHint = "\n\nSome files could not be deleted: an app (Xcode, a build) may still be using the "
+        + "worktree. Quit it, then choose Remove worktree again."
+
     /// What the failure alert says: why nothing more was deleted, and for an unmerged
     /// branch the command to run yourself.
     public var alertText: AlertText {
@@ -103,13 +118,36 @@ public struct Releaser: Sendable {
             throw .protectedBranch(branch: branch)
         }
         if let worktree = plan.worktree {
-            // A worktree already gone (earlier partial release, or deleted by hand) only needs its
-            // registration pruned, so a retry can move on to the branch.
-            let arguments = FileManager.default.fileExists(atPath: worktree)
-                ? ["-C", plan.repoPath, "worktree", "remove", "--", worktree]
-                : ["-C", plan.repoPath, "worktree", "prune"]
+            let prune = ["-C", plan.repoPath, "worktree", "prune"]
+            let marker = Self.leftoverMarker(of: plan)
+            let arguments: [String]
+            if !FileManager.default.fileExists(atPath: worktree) {
+                // Already gone (earlier release, or deleted by hand): only its registration to prune, so a
+                // retry can move on to the branch.
+                arguments = prune
+            } else if isLeftover(worktree, repoPath: plan.repoPath) || Self.isMarkedLeftover(worktree, marker: marker) {
+                // What a `worktree remove` that failed half way leaves: git forgot the worktree first, so it
+                // no longer removes the folder; its clean check had passed, so only what it was deleting is left.
+                do {
+                    try FileManager.default.removeItem(atPath: worktree)
+                } catch {
+                    throw .worktreeNotRemoved(message: error.localizedDescription + ReleaseError.retryHint)
+                }
+                arguments = prune
+            } else {
+                arguments = ["-C", plan.repoPath, "worktree", "remove", "--", worktree]
+            }
             let result = execute(arguments)
-            guard result.status == 0 else { throw .worktreeNotRemoved(message: result.error) }
+            guard result.status == 0 else {
+                let partial = result.error.contains("failed to delete")
+                if partial {
+                    // Git checked the worktree and forgot it before failing: what is left is only what it was
+                    // deleting. Remembered, since git may have deleted its `.git` link already.
+                    try? Data(worktree.utf8).write(to: marker, options: .atomic)
+                }
+                throw .worktreeNotRemoved(message: result.error + (partial ? ReleaseError.retryHint : ""))
+            }
+            try? FileManager.default.removeItem(at: marker)
         }
         // A branch already deleted (with the `branch -D` the alert shows) only needs the run file removed.
         for branch in plan.branches where branchExists(branch, repoPath: plan.repoPath) {
@@ -129,6 +167,36 @@ public struct Releaser: Sendable {
         } catch {
             throw .runFileNotRemoved(message: error.localizedDescription)
         }
+    }
+
+    /// Next to the run file: the worktree a failed `worktree remove` left, once git had checked it.
+    private static func leftoverMarker(of plan: ReleasePlan) -> URL {
+        plan.runFile.deletingPathExtension().appendingPathExtension("leftover")
+    }
+
+    private static func isMarkedLeftover(_ worktree: String, marker: URL) -> Bool {
+        (try? String(contentsOf: marker, encoding: .utf8)) == worktree
+    }
+
+    /// A folder git no longer knows as a worktree but that was one of this repo: its `.git` file still
+    /// points to `<repo's git dir>/worktrees/<name>`, which is gone. Any other folder is left alone.
+    private func isLeftover(_ worktree: String, repoPath: String) -> Bool {
+        let link = URL(fileURLWithPath: worktree).appendingPathComponent(".git")
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: link.path, isDirectory: &isDirectory), !isDirectory.boolValue,
+              let content = try? String(contentsOf: link, encoding: .utf8),
+              content.hasPrefix("gitdir: ")
+        else { return false }
+        let gitDir = URL(fileURLWithPath: String(content.dropFirst("gitdir: ".count))
+            .trimmingCharacters(in: .whitespacesAndNewlines))
+        let registrations = gitDir.deletingLastPathComponent()
+        let common = execute(["-C", repoPath, "rev-parse", "--path-format=absolute", "--git-common-dir"])
+        guard common.status == 0, registrations.lastPathComponent == "worktrees",
+              !FileManager.default.fileExists(atPath: gitDir.path)
+        else { return false }
+        let repoGitDir = URL(fileURLWithPath: common.output.trimmingCharacters(in: .whitespacesAndNewlines))
+        return registrations.deletingLastPathComponent().resolvingSymlinksInPath().path
+            == repoGitDir.resolvingSymlinksInPath().path
     }
 
     private func isProtected(_ branch: String, plan: ReleasePlan) -> Bool {

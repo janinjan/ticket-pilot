@@ -511,6 +511,11 @@ final class AppModel {
         runs.first { $0.id == runID }.flatMap { RunLine.showInFinderTitle($0, bytes: diskUsage[runID]) }
     }
 
+    /// "Remove worktree…", or "Remove from the list…" for a run that never had a worktree.
+    func releaseTitle(runID: String) -> String? {
+        runs.first { $0.id == runID }.map(Releasable.actionTitle(for:))
+    }
+
     func hasWorktree(runID: String) -> Bool {
         runs.first { $0.id == runID }?.worktree != nil
     }

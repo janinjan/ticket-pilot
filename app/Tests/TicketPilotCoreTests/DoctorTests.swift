@@ -14,11 +14,13 @@ private final class FakeJira: JiraSearching, @unchecked Sendable {
 
 private final class MCPRunner: ProcessRunning, @unchecked Sendable {
     var result: Result<ProcessResult, any Error>
+    private(set) var calls: [(executable: String, arguments: [String])] = []
     init(output: String = "", status: Int32 = 0) {
         result = .success(ProcessResult(status: status, output: output, error: ""))
     }
     func run(_ executable: String, _ arguments: [String], currentDirectory: URL?) throws -> ProcessResult {
-        try result.get()
+        calls.append((executable, arguments))
+        return try result.get()
     }
 }
 
@@ -134,6 +136,22 @@ private struct TokenError: Error {}
         let checks = await doctor.run()
         #expect(checks.map(\.id) == [.claudeCLI, .plugin, .mcp, .diskSpace])
         #expect(try check(checks, .plugin).pluginState == .current)
+    }
+
+    /// An app opened from the Finder has no shell PATH: a server started with `npx` would fail to connect
+    /// there while it works in the terminal.
+    @Test func mcpServersAreListedWithTheUsualToolFolders() async throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.home) }
+        let runner = MCPRunner(output: "figma: npx -y figma --stdio - ✔ Connected\n")
+        _ = await (try makeDoctor(fixture, runner: runner)).run()
+        let call = try #require(runner.calls.first { $0.arguments.suffix(2) == ["mcp", "list"] })
+        #expect(call.executable == "/usr/bin/env")
+        let path = try #require(call.arguments.first { $0.hasPrefix("PATH=") })
+        let folders = path.dropFirst("PATH=".count).split(separator: ":").map(String.init)
+        #expect(folders.starts(with: [fixture.home.appendingPathComponent(".local/bin").path, "/opt/homebrew/bin", "/usr/local/bin"]))
+        #expect(folders.contains("/usr/bin"))
+        #expect(call.arguments.last(where: { !$0.hasPrefix("PATH=") && $0 != "mcp" && $0 != "list" }) == fixture.claude)
     }
 
     @Test func missingClaudeBlocksEveryStart() async throws {
