@@ -413,10 +413,18 @@ class StartSkillTests(unittest.TestCase):
         text = skill()
         after = text[text.index("## After the report"):text.index("## Resume")]
         reopen = after.find('tp" run-step <id> 5')
-        done = after.find('tp" run-done <id>')
+        done = after.find('tp" run-done <id>', reopen)
         self.assertNotEqual(reopen, -1, "a code change after the report must reopen the run")
-        self.assertLess(reopen, done)
+        self.assertNotEqual(done, -1, "the reopened run must be closed again")
         self.assertIn("reviewer and auditor", after)
+
+    def test_more_testing_after_the_report_closes_the_run_again(self):
+        text = skill()
+        after = text[text.index("## After the report"):text.index("## Resume")]
+        more = after[after.index("More testing in the app"):]
+        more = more[:more.index("\n")]
+        self.assertLess(more.index('tp" run-step <id> 7'), more.index('tp" run-step <id> 10'))
+        self.assertLess(more.index('tp" run-step <id> 10'), more.index('tp" run-done <id>'))
 
     def test_each_commit_regenerates_untracked_files(self):
         self.assertIn("regenerate what git does not track", step_sections(skill())[9])
