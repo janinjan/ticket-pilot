@@ -359,7 +359,8 @@ class CliHookTests(HooksTestCase):
 class LanguageReminderTests(HooksTestCase):
     LANGUAGE = (
         "ticket-pilot: write every message to the user in the run's language (fr), "
-        "including summaries after tool or agent output; translate tool output, "
+        "including one-line progress notes between tool calls and summaries after tool or agent output; "
+        "a one-word reply such as \"go\" or \"ok\" does not change the language; translate tool output, "
         "never paste it in another language."
     )
     AUTONOMY = (

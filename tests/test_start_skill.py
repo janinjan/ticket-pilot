@@ -136,6 +136,28 @@ class StartSkillTests(unittest.TestCase):
         self.assertIn("--test-only no", only)
         self.assertIn("gives up the fix", only)
 
+    def test_an_unanswered_question_is_never_a_decision(self):
+        text = skill()
+        rule = text[text.index("**Questions.**"):text.index("**Proof.**")]
+        self.assertIn("is neither a yes nor a no", rule)
+        self.assertIn("never write that the user decided", rule)
+
+    def test_the_report_is_rewritten_whole_and_new_work_reopens_the_run(self):
+        text = skill()
+        after = text[text.index("## After the report"):text.index("## Resume")]
+        self.assertIn("never edit the saved report file", after)
+        self.assertIn("More testing in the app after the report", after)
+        self.assertIn("numbered again in one plan", after)
+        report = step_sections(text)[10]
+        self.assertIn("only when there are commits to send", report)
+
+    def test_a_naming_rule_of_the_user_wins_over_not_renaming_tests(self):
+        self.assertIn("unless the change makes one fall under a naming rule", step_sections(skill())[6])
+
+    def test_step_four_always_shows_its_table(self):
+        compare = step_sections(skill())[4]
+        self.assertIn("Show the table to the user before step 5", compare)
+
     def test_jira_line_only_when_validated(self):
         text = skill()
         self.assertIn("--jira-line", text)
@@ -304,6 +326,13 @@ class StartSkillTests(unittest.TestCase):
         self.assertIn("going back", section)
         self.assertIn("only for what you cannot drive", section)
 
+    def test_app_test_rebuilds_cleanly_and_taps_elements(self):
+        section = step_sections(skill())[7]
+        self.assertIn("reset what the repo injects or caches", section)
+        self.assertIn("tap the element itself", section)
+        self.assertIn("never coordinates from an older screenshot", section)
+        self.assertIn('"from the code"', section)
+
     def test_app_test_checks_the_proxy_rules(self):
         section = step_sections(skill())[7]
         self.assertIn("proxy's active rules", section)
@@ -329,6 +358,7 @@ class StartSkillTests(unittest.TestCase):
         self.assertIn("only in the language decided at the start", head)
         self.assertIn("language and register", head)
         self.assertIn("progress narration", head)
+        self.assertIn('a one-word reply ("go", "ok", "yes") never changes it', head)
         self.assertIn("never paste or echo them", head)
         self.assertIn("CLAUDE.md, memory", head)
         self.assertIn("write the report in the user's language", step_sections(text)[3])

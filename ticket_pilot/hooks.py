@@ -176,7 +176,8 @@ def _reminder(run: dict) -> str | None:
     if isinstance(language, str) and language.strip():
         parts.append(
             "ticket-pilot: write every message to the user in the run's language (%s), "
-            "including summaries after tool or agent output; translate tool output, "
+            "including one-line progress notes between tool calls and summaries after tool or agent output; "
+            "a one-word reply such as \"go\" or \"ok\" does not change the language; translate tool output, "
             "never paste it in another language." % language.strip()
         )
     parts.append(AUTONOMY_REMINDER)

@@ -12,7 +12,7 @@ Session tracking only works when the skill is invoked as `/ticket-pilot:start <K
 
 This file is written in English, but **you write to the user only in the language decided at the start** (see below). Language rule, checked before every message:
 
-- Decide the user's language once, at the start: the language instructions of the user's own instructions (CLAUDE.md, memory) win; otherwise the language of the user's messages. Record it right after the run exists: `"<plugin-root>/bin/tp" run-set <id> --language <code>` (`fr`, `en`, `pt-BR`…). On resume, read `language` in `run-show` and reuse it; do not decide again. Keep it for the whole run.
+- Decide the user's language once, at the start: the language instructions of the user's own instructions (CLAUDE.md, memory) win; otherwise the language of the user's messages. Record it right after the run exists: `"<plugin-root>/bin/tp" run-set <id> --language <code>` (`fr`, `en`, `pt-BR`…). On resume, read `language` in `run-show` and reuse it; do not decide again. Keep it for the whole run: a one-word reply ("go", "ok", "yes") never changes it, even though the word is English; only an explicit request of the user does.
 - Every sentence the user sees is in that language and register (if the user says "tu", say "tu"): one-line progress narration between tool calls, questions, summaries, tables, the test plan and the final report. No English sentence, not even a short "Checking the build".
 - Before EVERY message to the user, check that it is in the recorded language. This matters most for what is written right after a long tool or agent output: status summaries, errors and blockers. The drift happens there.
 - Agent and tool outputs often come back in another language (English): translate what you show, never paste or echo them.
@@ -58,7 +58,7 @@ Each of these makes the run a failure, whatever the result:
 
 **Autonomy.** Before asking the user anything, look for the answer yourself, wherever you have access: the app you drive (navigate it to find test data, for example browse "My ads" for an existing item to edit), the repo, the config, the tools (the proxy's CLI or export to list its active rules, the simulator, the repo's build skill). A tooling failure is not a question: retry with `"<plugin-root>/bin/tp" run-shell`, the repo's build skill or a regeneration first. Ask only for (a) a decision that belongs to the user (divergence, scope, product), (b) an action visible to others, (c) something you genuinely cannot obtain, and then say what you already tried.
 
-**Questions.** Following the autonomy rule above, ask only for decisions that change what gets built: a real divergence between sources, a real ambiguity, a conflict between the design and the ticket. One question at a time, always with your recommendation. Every question to the user (the go, a divergence, a branch reference, launching the app, any choice) is recorded first with `"<plugin-root>/bin/tp" run-wait <id> <kind> "<the question text, in the user's language>"`, the text of the question itself, never an empty text; the steps below repeat it where it applies. Then wait for the answer.
+**Questions.** Following the autonomy rule above, ask only for decisions that change what gets built: a real divergence between sources, a real ambiguity, a conflict between the design and the ticket. One question at a time, always with your recommendation. Every question to the user (the go, a divergence, a branch reference, launching the app, any choice) is recorded first with `"<plugin-root>/bin/tp" run-wait <id> <kind> "<the question text, in the user's language>"`, the text of the question itself, never an empty text; the steps below repeat it where it applies. Then wait for the answer. A reply that does not answer the question (the user talks about something else, comments on another point, says only "ok" to a question with several options) is neither a yes nor a no: answer what they said, then ask the question again in one sentence. Until it is answered, it stays open: a decision you take meanwhile is yours, listed as such in the report with ❓, and you never write that the user decided, chose or validated it.
 
 **Proof.** Every claim you make, during the run and in the report, comes with its proof: `path:line`, the command and its output, or a link. If you cannot prove it, say so and mark it ❓.
 
@@ -142,6 +142,8 @@ When the research shows that every request is already on `origin/<main_branch>` 
 
 Run `"<plugin-root>/bin/tp" run-step <id> 4`.
 
+Show the table to the user before step 5, even when nothing diverges (then say so in one line under it): it is what the report's alignment is checked against.
+
 1. Build a **table**, one row per aspect (API field, scope, empty or null value, wording, rendering…), one column per source:
 
    | Aspect | Web | iOS | Android | Back | → target |
@@ -177,7 +179,7 @@ Run `"<plugin-root>/bin/tp" run-step <id> 6`.
    - every added test is useful;
    - no dedicated test for a single value when an existing test can take one more line;
    - no test for an impossible scenario;
-   - existing tests are not renamed.
+   - existing tests are not renamed, unless the change makes one fall under a naming rule of the repo or of the user's instructions or memory (a suffix for a toggle ON, for example): then that rule wins, and the report says which test was renamed and why.
 5. **Toggle OFF = production**: prove, by reading the diff (`git -C "<worktree>" diff <base>`) and by the tests, that with the toggle OFF no behaviour changes. Quote the lines that prove it.
 
 ## Step 7 — Test in the app
@@ -198,13 +200,13 @@ For the whole step, apply the autonomy rule: find test data yourself by navigati
      - web: the repo's own development server command (its `package.json` scripts), then open the page.
    What you test, whatever builds it:
    - the app the users get, from its main scheme or target (on iOS the app's own scheme, not a framework's), never a module's demo app, unless the ticket is about that demo;
-   - built from the worktree, into a build folder inside it (`-derivedDataPath "<worktree>/dd"`), never a build made elsewhere or prebuilt modules: say in the test plan which commit the build comes from;
+   - built from the worktree, into a build folder inside it (`-derivedDataPath "<worktree>/dd"`), never a build made elsewhere or prebuilt modules: say in the test plan which commit the build comes from. Whenever the worktree moves to another commit (another branch, `origin/<main_branch>` for a check), reset what the repo injects or caches between builds (a module injector's leftovers, a project setup file marking modules as injected), generate the project again and rebuild; then check that the modules the ticket touches were compiled from that commit before running a case;
    - on a test environment, never production: launch with the enabled environment variables of the app's run scheme (`_APP_ENVIRONMENT_` for example, passed with `SIMCTL_CHILD_` on iOS), and name the environment in the test plan;
    - when a case needs a signed-in account, never ask for a password or accept one in the conversation: ask the user once to sign in themselves on your device (they see it in the simulator app), with `"<plugin-root>/bin/tp" run-wait <id> question "<in the user's language: sign in on the ticket-pilot simulator with a test account, then tell me>"`; the sign-in then stays on that device.
    Use a device of your own, the same from one run to the next, and reinstall over it, keeping its data, rather than uninstalling: screens shown once (cookies, onboarding, a sign-in) then stay behind you.
    - iOS: the simulator named `ticket-pilot` (`xcrun simctl list devices`); when there is none, create it once with `xcrun simctl create ticket-pilot <device type> <runtime>`, an iPhone of the runtime the repo builds for. Use never an existing simulator of the user's, booted or not: it holds their own data and sign-ins.
    - Android: an emulator of `emulator -list-avds` that no one is using (`adb devices` shows the running ones); one the user started stays theirs.
-2. Drive the app yourself to run the cases. Keep a screenshot of what proves each result in the folder that `"<plugin-root>/bin/tp" run-shots <id>` prints, named after its case (`case-1-toggle-on.png`), and cite it in the test plan next to the result. A cookie or consent screen, an onboarding or a "what's new" screen on the way is accepted or closed without asking, unless the ticket is about it; it is not one of the cases.
+2. Drive the app yourself to run the cases. Always tap the element itself, found in an element list read just before (by its reference or its label), never coordinates from an older screenshot: the page may have scrolled since. After each tap, look at the screen again before the next action. Keep a screenshot of what proves each result in the folder that `"<plugin-root>/bin/tp" run-shots <id>` prints, named after its case (`case-1-toggle-on.png`), and cite it in the test plan next to the result. A cookie or consent screen, an onboarding or a "what's new" screen on the way is accepted or closed without asking, unless the ticket is about it; it is not one of the cases.
    - with a device MCP server when one is connected (mobile-mcp, for example: screenshots, element list, taps, swipes, text, on iOS and Android alike). Its tools may be loaded only on demand: look for them with ToolSearch (`tap screenshot device`) before concluding there is none;
    - else on Android with `adb` itself: `adb exec-out screencap -p` for a screenshot, `adb shell uiautomator dump` for the elements and their positions, `adb shell input tap|swipe|text|keyevent`;
    - else on iOS, `xcrun simctl io booted screenshot` gives screenshots but nothing can tap: give the user the cases to run (point 3), with the app already launched.
@@ -216,7 +218,7 @@ For the whole step, apply the autonomy rule: find test data yourself by navigati
    - edge cases;
    - **toggle ON, then OFF** (non-regression);
    - network calls, checked yourself: export the captured traffic with the proxy's CLI (a HAR export, for example) and read the requests and responses the cases need; a "Proxy:" check is never left ❓ for want of looking.
-   A result stays ❓ (not tested) only for what you cannot drive or reach, with the reason; everything else is run.
+   A result stays ❓ (not tested) only for what you cannot drive or reach, with the reason; everything else is run. A behaviour you only read in the code is told as such ("from the code", with `path:line`) and, when the app can be driven, checked in it before you state it as a fact.
 6. Write the **test plan in QA format** and record each result ✅ / ❌ / ❓, following `references/test-plan-format.md`: prerequisites, numbered and titled cases (one per request, one per branch added in the diff, real data, "Proxy:" checks), complementary checks (toggle OFF identical to production, out-of-scope cases unchanged) and open questions. The plan has no code references (no file paths, `path:line`, code names or endpoint paths): it is written in plain functional language, with the case ↔ request link as "(Request N)".
 7. The plan and its results go into the final report, ready to be pasted as is into a Jira comment by the user, with the path of the screenshots folder: the user attaches its files to the comment. The traceability to the code goes in a separate **Coverage** list of the report: one line per case, case title → request number and/or diff branch (`path:line`).
 
@@ -299,7 +301,7 @@ When settings were worked out (see Settings worked out), ask once, after the rep
 
 Then run `"<plugin-root>/bin/tp" run-done <id>`.
 
-End the report with the command the user runs to send the branch, chosen by the repo entry's `review`, printed for the user only (do not run it):
+End the report, only when there are commits to send, with the command the user runs to send the branch, chosen by the repo entry's `review`, printed for the user only (do not run it):
 
 - `review` is `gerrit` → `cd "<worktree>" && git review` (print it, do not run it);
 - `review` is `github` → `cd "<worktree>" && git push -u origin <branch>` then `gh pr create` (print them, do not run them);
@@ -323,7 +325,9 @@ Switching, in the same run (a run of the same ticket and repo cannot be started 
 
 ## After the report
 
-The user often reacts to the report: a naming, a test result to correct, a line to remove. A remark that only corrects the report (a wording of the test plan, a ❓ the user answers) → fix the report and save it again with `run-report`, nothing else. A remark that changes the code or the commits reopens the run; never patch it outside the steps:
+The user often reacts to the report: a naming, a test result to correct, a line to remove. A remark that only corrects the report (a wording of the test plan, a ❓ the user answers) → fix the report and save it again with `run-report`, nothing else. Every change to the report is saved as the full report, rewritten as one consistent text and sent again with `run-report`: never edit the saved report file in place, and never leave a sentence that a later change contradicts.
+
+More testing in the app after the report (cases the user asks for, another platform) reopens the run first: `"<plugin-root>/bin/tp" run-step <id> 7`, then the cases, then step 10 again with the full report: the new cases join the earlier ones, numbered again in one plan, in a logical order, not appended at the end. A worktree, an emulator or a simulator made for that is named in the report, and removed at the end unless the user wants to keep it. A remark that changes the code or the commits reopens the run; never patch it outside the steps:
 
 1. Run `"<plugin-root>/bin/tp" run-step <id> 5`: the run is no longer `done`. Make the change on the branch.
 2. Step 6 again (build, tests, toggle OFF).
