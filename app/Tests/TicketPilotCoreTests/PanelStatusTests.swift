@@ -5,7 +5,7 @@ import Testing
 @Suite(.timeLimit(.minutes(1))) struct PanelStatusTests {
     static let now = Date(timeIntervalSince1970: 1_800_000_000)
     static let connectJira = SetupProblem(
-        title: "Connect Jira…", explanation: "Connect Jira to see your tickets here.", action: .setJiraToken
+        title: "Connect Jira…", explanation: "Connect Jira to see your tickets here.", action: .connectAtlassian
     )
 
     static func run(

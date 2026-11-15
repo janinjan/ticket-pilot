@@ -18,7 +18,6 @@ DEFAULTS = {
 
 REVIEW_KINDS = ("gerrit", "github")
 
-JIRA_AUTH_KINDS = ("mcp", "api_token")
 
 REPO_STRING_KEYS = (
     "setup_command", "ci_review_prompt", "ci_review_command", "launch_skill", "sync_command", "editor",
@@ -138,10 +137,6 @@ def validate(cfg: dict) -> list[str]:
             problems.append(
                 "repos[%s].ci_review_prompt does not exist: %s" % (name, prompt)
             )
-
-    jira = cfg.get("jira")
-    if isinstance(jira, dict) and "auth" in jira and jira["auth"] not in JIRA_AUTH_KINDS:
-        problems.append("jira.auth must be 'mcp' or 'api_token'")
 
     backend = cfg.get("backend")
     if backend is None:

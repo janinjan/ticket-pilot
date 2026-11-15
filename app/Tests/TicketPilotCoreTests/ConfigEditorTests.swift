@@ -106,64 +106,29 @@ import Testing
         #expect(throws: ConfigEditError.notAnObject) { try Self.edit("Warp", in: "[1, 2]") }
     }
 
-    // MARK: - jira.auth
-
-    static func editAuth(_ value: String, in text: String = config) throws -> String {
-        String(decoding: try ConfigEditor.setJiraAuth(value, in: Data(text.utf8)), as: UTF8.self)
-    }
-
-    @Test func test_setsTheJiraAuthInsideJiraAndKeepsEverythingElse() throws {
-        let output = try Self.editAuth("api_token")
-        let before = try Self.object(Self.config).mutableCopy() as! NSMutableDictionary
-        let jira = (before["jira"] as! NSDictionary).mutableCopy() as! NSMutableDictionary
-        jira["auth"] = "api_token"
-        before["jira"] = jira
-        #expect(try Self.object(output) == before)
-        #expect(output.contains("\"ratio\": 1.50"))
-        #expect(output.contains(#""keychain_service": "tp",\#n    "auth": "api_token""#))
-    }
-
-    @Test func test_replacesAnExistingJiraAuth() throws {
-        let output = try Self.editAuth("mcp", in: #"{"jira": {"auth": "api_token", "site": "s"}}"#)
-        #expect(output == "{\n  \"jira\": {\n    \"auth\": \"mcp\",\n    \"site\": \"s\"\n  }\n}\n")
-    }
-
-    @Test func test_jiraAuthNeedsAJiraObject() {
-        #expect(throws: ConfigEditError.notAnObject) { try Self.editAuth("mcp", in: #"{"jira": 1}"#) }
-        #expect(throws: ConfigEditError.notAnObject) { try Self.editAuth("mcp", in: #"{"repos": []}"#) }
-    }
-
     // MARK: - Guided setup
 
     static func string(_ data: Data) -> String { String(decoding: data, as: UTF8.self) }
 
     @Test func test_fillJiraCreatesAConfig() throws {
-        let data = try ConfigEditor.fillJira(site: URL(string: "https://acme.atlassian.net")!, email: "me@acme.com", in: nil)
+        let data = try ConfigEditor.fillJira(site: URL(string: "https://acme.atlassian.net")!, in: nil)
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("tp-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: url) }
         try data.write(to: url)
         let config = try AppConfig.load(from: url)
         #expect(config.jira.site == URL(string: "https://acme.atlassian.net")!)
-        #expect(config.jira.email == "me@acme.com")
         #expect(config.repos.isEmpty)
     }
 
     @Test func test_fillJiraKeepsWhatIsWritten() throws {
         let text = #"{"jira": {"site": "https://mine.atlassian.net", "auth": "api_token"}, "repos": [], "poll_minutes": 2}"#
         let output = Self.string(try ConfigEditor.fillJira(
-            site: URL(string: "https://acme.atlassian.net")!, email: "me@acme.com", in: Data(text.utf8)
+            site: URL(string: "https://acme.atlassian.net")!, in: Data(text.utf8)
         ))
         let jira = try #require(try Self.object(output)["jira"] as? NSDictionary)
         #expect(jira["site"] as? String == "https://mine.atlassian.net")
-        #expect(jira["email"] as? String == "me@acme.com")
         #expect(jira["auth"] as? String == "api_token")
         #expect(try Self.object(output)["poll_minutes"] as? Int == 2)
-    }
-
-    @Test func test_fillJiraWithoutEmailWritesNone() throws {
-        let output = Self.string(try ConfigEditor.fillJira(site: URL(string: "https://acme.atlassian.net")!, email: nil, in: nil))
-        let jira = try #require(try Self.object(output)["jira"] as? NSDictionary)
-        #expect(jira["email"] == nil)
     }
 
     static let web = RepoEntry(
@@ -190,7 +155,7 @@ import Testing
     @Test func test_pathsAreWrittenWithoutEscapedSlashes() throws {
         let output = Self.string(try ConfigEditor.addRepo(Self.web, in: Data(Self.config.utf8)))
         #expect(output.contains(#""path": "/r/web""#))
-        let jira = Self.string(try ConfigEditor.fillJira(site: URL(string: "https://acme.atlassian.net")!, email: nil, in: nil))
+        let jira = Self.string(try ConfigEditor.fillJira(site: URL(string: "https://acme.atlassian.net")!, in: nil))
         #expect(jira.contains(#""site": "https://acme.atlassian.net""#))
     }
 

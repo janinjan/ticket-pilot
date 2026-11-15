@@ -79,7 +79,7 @@ Each of these makes the run a failure, whatever the result:
 
 Run `"<plugin-root>/bin/tp" run-step <id> 1`.
 
-1. Read the whole ticket with the Atlassian MCP tools. Fallback: the Jira REST API with the config's `jira.site` and `jira.email`, and the token from the Keychain entry `ticket-pilot-jira` (`security find-generic-password -s ticket-pilot-jira -w`). Never print the token.
+1. Read the whole ticket with the Atlassian MCP tools, the only way ticket-pilot reads Jira (there is no API token). When they are not available or fail, say so, tell the user to connect the Atlassian MCP server in Claude Code (`/mcp`) and stop: never guess the ticket.
    - description and acceptance criteria;
    - **every comment**: a late comment often changes the scope ("in the end we do X");
    - attachments, linked tickets, the parent epic.

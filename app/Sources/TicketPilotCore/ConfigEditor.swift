@@ -41,31 +41,9 @@ public enum ConfigEditor {
         return Data((render(.object(members), indent: "") + "\n").utf8)
     }
 
-    /// Sets `jira.auth` to `value` (`mcp` or `api_token`), every other key kept; a new key goes at the end
-    /// of the `jira` object.
-    public static func setJiraAuth(_ value: String, in data: Data) throws(ConfigEditError) -> Data {
-        guard (try? JSONSerialization.jsonObject(with: data)) != nil else { throw .invalidJSON }
-        var parser = Parser(bytes: Array(data))
-        let root: Value
-        do {
-            root = try parser.document()
-        } catch {
-            throw .invalidJSON
-        }
-        guard case var .object(members) = root,
-              let jiraIndex = members.lastIndex(where: { $0.key == "\"jira\"" }),
-              case var .object(jira) = members[jiraIndex].value
-        else { throw .notAnObject }
-        guard let encoded = try? encoder.encode(value) else { throw .invalidName }
-        set("\"auth\"", to: .scalar(String(decoding: encoded, as: UTF8.self)), in: &jira)
-        members[jiraIndex].value = .object(jira)
-        return Data((render(.object(members), indent: "") + "\n").utf8)
-    }
-
-    /// nil `data`: a new config, `{"jira": {"site", "email"}, "repos": []}`. Else sets only what is missing:
-    /// `jira.site`, `jira.email` (never a value already written), the `jira` object and the `repos` list.
-    /// A nil `email` writes no `email`.
-    public static func fillJira(site: URL, email: String?, in data: Data?) throws(ConfigEditError) -> Data {
+    /// nil `data`: a new config, `{"jira": {"site"}, "repos": []}`. Else sets only what is missing: `jira.site`
+    /// (never a value already written), the `jira` object and the `repos` list.
+    public static func fillJira(site: URL, in data: Data?) throws(ConfigEditError) -> Data {
         var members = try data.map { data throws(ConfigEditError) in try topLevel(of: data) } ?? []
         var jira: [(key: String, value: Value)] = []
         if let index = members.lastIndex(where: { $0.key == "\"jira\"" }) {
@@ -74,9 +52,6 @@ public enum ConfigEditor {
         }
         if !jira.contains(where: { $0.key == "\"site\"" }) {
             jira.append(("\"site\"", try string(site.absoluteString)))
-        }
-        if let email, !jira.contains(where: { $0.key == "\"email\"" }) {
-            jira.append(("\"email\"", try string(email)))
         }
         set("\"jira\"", to: .object(jira), in: &members)
         if !members.contains(where: { $0.key == "\"repos\"" }) {

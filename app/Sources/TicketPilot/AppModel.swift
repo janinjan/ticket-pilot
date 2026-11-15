@@ -52,9 +52,7 @@ final class AppModel {
     private(set) var summaries: [String: String] = [:]
     /// True from the plugin install's confirmation until its last command has run.
     private(set) var installingPlugin = false
-    /// `jira.auth` of the config: how Jira is read.
-    private(set) var jiraAuth: JiraAuth = .mcp
-    /// An Atlassian sign-in is stored (`jira.auth` `mcp`), whether or not Atlassian accepts it.
+    /// An Atlassian sign-in is stored, whether or not Atlassian accepts it.
     private(set) var hasAtlassianSignIn = false
     /// The email of the signed-in Atlassian account, once Atlassian told it.
     private(set) var jiraAccount: String?
@@ -82,7 +80,7 @@ final class AppModel {
 
     /// The signed-in Atlassian account can open no Jira site, so no config could be written.
     private(set) var noJiraSite = false
-    /// Reading the account to write the Jira site and email, after a sign-in.
+    /// Reading the account to write the Jira site, after a sign-in.
     @ObservationIgnored private var settingUpJira = false
     /// Whether this launch (or the last sign-in) already tried to write the config from a stored sign-in.
     @ObservationIgnored private var jiraSetupTried = false
@@ -213,7 +211,7 @@ final class AppModel {
                 jiraSetupTried = true
                 completeJiraSetup(signInIfNeeded: false)
             }
-            let doctor = makeDoctor(config: nil, jira: nil, tokenLookup: { throw KeychainError.notFound })
+            let doctor = makeDoctor(config: nil, jira: nil, signInLookup: { throw KeychainError.notFound })
             doctorTask = Task { [weak self] in
                 let checks = await Task.detached { await doctor.run() }.value
                 guard !Task.isCancelled, let self else { return }
@@ -223,8 +221,6 @@ final class AppModel {
             }
             return
         }
-        jiraAuth = config.jira.auth
-        let service = JiraSettings.tokenKeychainService
         let runner = runner
         let auth = atlassianAuth
         doctorTask = Task { [weak self] in
@@ -234,23 +230,13 @@ final class AppModel {
                 token = .success("debug")
                 jira = DebugJira(count: count)
             } else {
-                switch config.jira.auth {
-                case .apiToken:
-                    token = await Task.detached {
-                        Result<String, KeychainError> { () throws(KeychainError) in try Keychain.password(service: service) }
-                    }.value
-                    jira = (try? token.get()).map {
-                        JiraClient(site: config.jira.site, email: config.jira.email ?? "", token: $0)
-                    }
-                case .mcp:
-                    token = await Self.atlassianSignIn(auth)
-                    jira = (try? token.get()).map { _ in
-                        MCPJiraClient(site: config.jira.site, tools: MCPClient(url: auth.server, tokens: auth, clientVersion: Self.version))
-                    }
+                token = await Self.atlassianSignIn(auth)
+                jira = (try? token.get()).map { _ in
+                    MCPJiraClient(site: config.jira.site, tools: MCPClient(url: auth.server, tokens: auth, clientVersion: Self.version))
                 }
             }
             guard !Task.isCancelled, let self else { return }
-            hasAtlassianSignIn = config.jira.auth == .mcp && (try? token.get()) != nil
+            hasAtlassianSignIn = (try? token.get()) != nil
             if !hasAtlassianSignIn { jiraAccount = nil }
             if let jira {
                 poller?.start(jira: jira, pollMinutes: config.pollMinutes)
@@ -258,7 +244,7 @@ final class AppModel {
                 poller?.stop()
                 jiraFailing = true
             }
-            let doctor = makeDoctor(config: config, jira: jira, tokenLookup: { try token.get() })
+            let doctor = makeDoctor(config: config, jira: jira, signInLookup: { try token.get() })
             let checks = await Task.detached { await doctor.run() }.value
             guard !Task.isCancelled else { return }
             health = checks
@@ -273,14 +259,14 @@ final class AppModel {
     }
 
     private func makeDoctor(
-        config: AppConfig?, jira: (any JiraSearching)?, tokenLookup: @escaping @Sendable () throws -> String
+        config: AppConfig?, jira: (any JiraSearching)?, signInLookup: @escaping @Sendable () throws -> String
     ) -> Doctor {
         Doctor(
             config: config,
             home: FileManager.default.homeDirectoryForCurrentUser,
             runner: runner,
             jira: jira,
-            tokenLookup: tokenLookup,
+            signInLookup: signInLookup,
             freeBytes: freeBytesOnHomeVolume,
             bundledPluginManifest: Doctor.bundledPluginManifest(resources: Bundle.main.resourceURL)
         )
@@ -1027,7 +1013,6 @@ final class AppModel {
         switch setupProblem.action {
         case let .openURL(url): NSWorkspace.shared.open(url)
         case let .copyFix(check): copyFix(of: check)
-        case .setJiraToken: setJiraToken()
         case .connectAtlassian:
             if configProblem == .missing { completeJiraSetup(signInIfNeeded: true) } else { connectAtlassian() }
         case let .explain(text): Alerts.show(text)
@@ -1039,8 +1024,7 @@ final class AppModel {
 
     // MARK: - Guided setup
 
-    /// With a stored Atlassian sign-in: reads the account and writes `jira.site` and `jira.email` where they
-    /// are missing (creating the config), asking which site when the account has several. Without one,
+    /// With a stored Atlassian sign-in: reads the account and writes `jira.site` where it is missing (creating the config), asking which site when the account has several. Without one,
     /// opens the sign-in when `signInIfNeeded` (a click), else does nothing (a launch).
     private func completeJiraSetup(signInIfNeeded: Bool) {
         guard !settingUpJira else { return }
@@ -1079,17 +1063,17 @@ final class AppModel {
                     site = chosen
                 }
                 noJiraSite = false
-                if writeJira(site: site, email: account.email) { runDoctor() }
+                if writeJira(site: site) { runDoctor() }
             }
         }
     }
 
-    /// Fills the Jira site and email of the config, creating the file (and its folder) when there is none.
-    private func writeJira(site: URL, email: String?) -> Bool {
+    /// Fills the Jira site of the config, creating the file (and its folder) when there is none.
+    private func writeJira(site: URL) -> Bool {
         let file = paths.configFile.resolvingSymlinksInPath()
         do {
             let existing = FileManager.default.fileExists(atPath: file.path) ? try Data(contentsOf: file) : nil
-            let data = try ConfigEditor.fillJira(site: site, email: email, in: existing)
+            let data = try ConfigEditor.fillJira(site: site, in: existing)
             try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
             try data.write(to: file, options: .atomic)
             return true
@@ -1297,58 +1281,6 @@ final class AppModel {
             self?.noJiraSite = false
             self?.hasAtlassianSignIn = false
             self?.runDoctor()
-        }
-    }
-
-    /// Switches `jira.auth` to `api_token`, then asks for the token.
-    func useAPIToken() {
-        cancelSignIn()
-        guard editConfig(failure: "Jira was not switched to an API token", { try ConfigEditor.setJiraAuth("api_token", in: $0) })
-        else { return }
-        runDoctor()
-        setJiraToken()
-    }
-
-    /// Switches `jira.auth` back to `mcp`, then signs in unless a sign-in is already stored.
-    func useAtlassianSignIn() {
-        guard editConfig(failure: "Jira was not switched to the Atlassian sign-in", { try ConfigEditor.setJiraAuth("mcp", in: $0) })
-        else { return }
-        runDoctor()
-        let auth = atlassianAuth
-        Task { [weak self] in
-            if case .failure(.notFound) = await Self.atlassianSignIn(auth) {
-                self?.connectAtlassian()
-            }
-        }
-    }
-
-    // MARK: - Jira token
-
-    /// Asks for the token, stores it in the Keychain and checks the setup again.
-    func setJiraToken() {
-        guard let config else { return }
-        guard let answer = Alerts.askJiraToken(site: config.jira.site.absoluteString, email: config.jira.email ?? "your Atlassian account") else {
-            return
-        }
-        guard let token = answer.nonEmpty else {
-            Alerts.show(AlertText(title: "The token is empty", message: "Nothing was saved."))
-            return
-        }
-        let service = JiraSettings.tokenKeychainService
-        let account = NSUserName()
-        Task { [weak self] in
-            let result = await Task.detached {
-                Result<Void, KeychainError> { () throws(KeychainError) in
-                    try Keychain.setPassword(token, service: service, account: account)
-                }
-            }.value
-            switch result {
-            case .success:
-                self?.runDoctor()
-            case let .failure(error):
-                let detail = if case let .unexpected(status) = error { "Keychain status \(status)" } else { "\(error)" }
-                Alerts.show(AlertText(title: "The Jira token was not saved", message: detail))
-            }
         }
     }
 

@@ -26,25 +26,16 @@ struct AppConfigTests {
         #expect(config.repos[1].editor == nil)
     }
 
-    @Test func test_keychainServiceIsNoLongerNeeded() throws {
-        let url = try writeTemp("""
-        {"jira":{"site":"https://acme.atlassian.net","email":"a@b.c"},"repos":[]}
-        """)
-        defer { try? FileManager.default.removeItem(at: url) }
-        #expect(try AppConfig.load(from: url).jira.site.host == "acme.atlassian.net")
-        let old = try writeTemp("""
-        {"jira":{"site":"https://acme.atlassian.net","email":"a@b.c","keychain_service":"old"},"repos":[]}
-        """)
-        defer { try? FileManager.default.removeItem(at: old) }
-        #expect(try AppConfig.load(from: old).jira.email == "a@b.c")
-        #expect(JiraSettings.tokenKeychainService == "ticket-pilot-jira")
-    }
-
-    /// The sign-in may not tell the email: a config the app wrote without one still loads.
-    @Test func test_aConfigWithoutEmailLoads() throws {
-        let url = try writeTemp(#"{"jira":{"site":"https://acme.atlassian.net"},"repos":[]}"#)
-        defer { try? FileManager.default.removeItem(at: url) }
-        #expect(try AppConfig.load(from: url).jira.email == nil)
+    /// Only the site is read: an older config's email and keychain_service are ignored.
+    @Test func test_onlyTheJiraSiteIsNeeded() throws {
+        for jira in [
+            #"{"site":"https://acme.atlassian.net"}"#,
+            #"{"site":"https://acme.atlassian.net","email":"a@b.c","keychain_service":"old"}"#,
+        ] {
+            let url = try writeTemp(#"{"jira":\#(jira),"repos":[]}"#)
+            defer { try? FileManager.default.removeItem(at: url) }
+            #expect(try AppConfig.load(from: url).jira.site.host == "acme.atlassian.net")
+        }
     }
 
     @Test func test_defaultsWhenOptionalKeysAreMissing() throws {
@@ -62,7 +53,6 @@ struct AppConfigTests {
         #expect(config.permissionMode == nil)
         #expect(config.stuckMinutes == [:])
         #expect(config.repos[0].match.labels == [])
-        #expect(config.jira.auth == .mcp)
 
         let overridden = try AppConfig.load(from: writeTemp("""
         {"jira": {"site": "https://example.atlassian.net", "email": "a@example.com",
@@ -125,15 +115,14 @@ struct AppConfigTests {
         #expect(config.repos[0].expandedPath == NSHomeDirectory() + "/repos/ios")
     }
 
-    @Test func test_readsTheJiraAuth() throws {
-        func config(_ auth: String) throws -> AppConfig {
-            try AppConfig.load(from: try writeTemp("""
+    /// Jira is only read through the Atlassian sign-in: an older config's `auth` key is ignored.
+    @Test func test_anOldJiraAuthKeyIsIgnored() throws {
+        for auth in ["mcp", "api_token", "password"] {
+            let config = try AppConfig.load(from: try writeTemp("""
             {"jira": {"site": "https://example.atlassian.net", "email": "a@example.com",
                       "keychain_service": "svc", "auth": "\(auth)"}, "repos": []}
             """))
+            #expect(config.jira.site.host == "example.atlassian.net")
         }
-        #expect(try config("mcp").jira.auth == .mcp)
-        #expect(try config("api_token").jira.auth == .apiToken)
-        #expect(throws: ConfigError.self) { try config("password") }
     }
 }

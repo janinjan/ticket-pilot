@@ -1,7 +1,7 @@
 import Foundation
 
-/// Read-only Jira through the Atlassian Remote MCP server's tools: the same searches as `JiraClient`,
-/// with the Atlassian sign-in instead of an API token.
+/// Read-only Jira through the Atlassian Remote MCP server's tools, with the Atlassian sign-in: the only way
+/// TicketPilot reads Jira.
 public actor MCPJiraClient: JiraSearching {
     private static let openAssignedJQL = "assignee = currentUser() AND statusCategory != Done"
     private static let fields: [String] = ["summary", "status", "labels", "components"]

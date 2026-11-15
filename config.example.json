@@ -1,8 +1,6 @@
 {
   "jira": {
-    "site": "https://your-site.atlassian.net",
-    "email": "you@example.com",
-    "auth": "mcp"
+    "site": "https://your-site.atlassian.net"
   },
   "repos": [
     {

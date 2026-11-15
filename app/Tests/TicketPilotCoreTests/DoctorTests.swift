@@ -68,14 +68,13 @@ private struct TokenError: Error {}
         return Fixture(home: home, claude: claudePath, repoPaths: paths, bundledManifest: manifest)
     }
 
-    func makeConfig(_ fixture: Fixture, auth: String = "api_token", webGuidelines: String = "") throws -> AppConfig {
+    func makeConfig(_ fixture: Fixture, webGuidelines: String = "") throws -> AppConfig {
         let repos = ["ios", "web"].map {
             let guidelines = $0 == "web" && !webGuidelines.isEmpty ? #","guidelines":["\#(webGuidelines)"]"# : ""
             return #"{"name":"\#($0)","path":"\#(fixture.repoPaths[$0]!)","main_branch":"main","review":"none"\#(guidelines)}"#
         }
         let json = """
-        {"jira":{"site":"https://example.atlassian.net","email":"me@example.com",\
-        "auth":"\(auth)"},
+        {"jira":{"site":"https://example.atlassian.net"},
          "repos":[\(repos.joined(separator: ","))]}
         """
         return try JSONDecoder().decode(AppConfig.self, from: Data(json.utf8))
@@ -87,15 +86,14 @@ private struct TokenError: Error {}
         jira: JiraSearching? = FakeJira(),
         token: @escaping @Sendable () throws -> String = { "secret" },
         freeBytes: Int64? = 100_000_000_000,
-        auth: String = "api_token",
         webGuidelines: String = ""
     ) throws -> Doctor {
         Doctor(
-            config: try makeConfig(fixture, auth: auth, webGuidelines: webGuidelines),
+            config: try makeConfig(fixture, webGuidelines: webGuidelines),
             home: fixture.home,
             runner: runner,
             jira: jira,
-            tokenLookup: token,
+            signInLookup: token,
             freeBytes: { freeBytes },
             claudeSearchPaths: [fixture.claude],
             bundledPluginManifest: fixture.bundledManifest
@@ -110,7 +108,7 @@ private struct TokenError: Error {}
         let fixture = try makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.home) }
         let checks = await (try makeDoctor(fixture)).run()
-        #expect(checks.map(\.id) == [.claudeCLI, .plugin, .jiraToken, .jiraReachable, .mcp, .repoPaths, .diskSpace])
+        #expect(checks.map(\.id) == [.claudeCLI, .plugin, .jiraSignIn, .jiraReachable, .mcp, .repoPaths, .diskSpace])
         let allOk = checks.allSatisfy { $0.ok }
         #expect(allOk)
         #expect(checks.allSatisfy { $0.ok })
@@ -128,7 +126,7 @@ private struct TokenError: Error {}
             home: fixture.home,
             runner: MCPRunner(output: "atlassian: https://x - ✓ Connected\n"),
             jira: nil,
-            tokenLookup: { throw KeychainError.notFound },
+            signInLookup: { throw KeychainError.notFound },
             freeBytes: { 100_000_000_000 },
             claudeSearchPaths: [fixture.claude],
             bundledPluginManifest: fixture.bundledManifest
@@ -233,68 +231,6 @@ private struct TokenError: Error {}
         #expect(await (try makeDoctor(missing)).run().claudePath == nil)
     }
 
-    @Test func missingTokenBlocksWithKeychainFix() async throws {
-        let fixture = try makeFixture()
-        defer { try? FileManager.default.removeItem(at: fixture.home) }
-        let checks = await (try makeDoctor(fixture, jira: nil, token: { throw TokenError() })).run()
-        let token = try check(checks, .jiraToken)
-        #expect(!token.ok)
-        #expect(token.blocksStart)
-        let fix = try #require(token.fix)
-        #expect(fix.contains("ticket-pilot-jira"))
-        #expect(token.fix == #"security add-generic-password -s "ticket-pilot-jira" -a "$USER" -w"#)
-        let reachable = try check(checks, .jiraReachable)
-        #expect(!reachable.ok)
-        #expect(!reachable.blocksStart)
-        #expect(reachable.detail == "not checked: no Jira token")
-    }
-
-    @Test func unauthorizedVersusUnreachable() async throws {
-        let fixture = try makeFixture()
-        defer { try? FileManager.default.removeItem(at: fixture.home) }
-        let unauthorized = await (try makeDoctor(fixture, jira: FakeJira(.unauthorized))).run()
-        let unreachable = await (try makeDoctor(fixture, jira: FakeJira(.unreachable))).run()
-
-        let refused = try check(unauthorized, .jiraToken)
-        #expect(!refused.ok)
-        #expect(refused.blocksStart)
-        let answered = try check(unauthorized, .jiraReachable)
-        #expect(answered.ok)
-
-        let tokenStillFine = try check(unreachable, .jiraToken)
-        #expect(tokenStillFine.ok)
-        let reachable = try check(unreachable, .jiraReachable)
-        #expect(!reachable.ok)
-        #expect(reachable.blocksStart)
-        #expect(reachable.fix == "Check the network or the VPN")
-    }
-
-    @Test func test_keychainAccessRefusedIsNotAMissingToken() async throws {
-        let fixture = try makeFixture()
-        defer { try? FileManager.default.removeItem(at: fixture.home) }
-        let refused = await (try makeDoctor(fixture, jira: nil, token: { throw KeychainError.unexpected(-128) })).run()
-        let token = try check(refused, .jiraToken)
-        #expect(!token.ok)
-        #expect(token.blocksStart)
-        #expect(token.detail == "Keychain access was refused or failed (status -128)")
-        #expect(token.fix == "Allow TicketPilot in the Keychain prompt, then choose Check again")
-        let missing = await (try makeDoctor(fixture, jira: nil, token: { throw KeychainError.notFound })).run()
-        #expect(try check(missing, .jiraToken).detail == "No Jira token in the Keychain")
-    }
-
-    @Test func test_needsTokenWhenMissingOrRefusedButNotWhenKeychainFailed() async throws {
-        let fixture = try makeFixture()
-        defer { try? FileManager.default.removeItem(at: fixture.home) }
-        let missing = await (try makeDoctor(fixture, jira: nil, token: { throw KeychainError.notFound })).run()
-        let refusedByJira = await (try makeDoctor(fixture, jira: FakeJira(.unauthorized))).run()
-        let keychainFailed = await (try makeDoctor(fixture, jira: nil, token: { throw KeychainError.unexpected(-128) })).run()
-        let healthy = await (try makeDoctor(fixture)).run()
-        #expect(try check(missing, .jiraToken).needsToken)
-        #expect(try check(refusedByJira, .jiraToken).needsToken)
-        #expect(try !check(keychainFailed, .jiraToken).needsToken)
-        #expect(try !check(healthy, .jiraToken).needsToken)
-    }
-
     // MARK: - Atlassian MCP
 
     func makeMCPDoctor(
@@ -302,7 +238,7 @@ private struct TokenError: Error {}
         jira: JiraSearching? = FakeJira(),
         credentials: @escaping @Sendable () throws -> String = { "stored" }
     ) throws -> Doctor {
-        try makeDoctor(fixture, jira: jira, token: credentials, auth: "mcp")
+        try makeDoctor(fixture, jira: jira, token: credentials)
     }
 
     @Test func test_mcpConnected() async throws {
@@ -324,7 +260,7 @@ private struct TokenError: Error {}
         let signIn = try check(checks, .jiraSignIn)
         #expect(!signIn.ok)
         #expect(signIn.blocksStart)
-        #expect(signIn.needsToken)
+        #expect(signIn.needsSignIn)
         #expect(signIn.detail == "Not connected to Atlassian")
         #expect(signIn.fix == nil)
         #expect(try check(checks, .jiraReachable).detail == "not checked: not connected")
@@ -337,7 +273,7 @@ private struct TokenError: Error {}
             let checks = await (try makeMCPDoctor(fixture, jira: FakeJira(error))).run()
             let signIn = try check(checks, .jiraSignIn)
             #expect(!signIn.ok)
-            #expect(signIn.needsToken)
+            #expect(signIn.needsSignIn)
             #expect(signIn.detail == "Atlassian refused the sign-in")
         }
     }
@@ -350,10 +286,10 @@ private struct TokenError: Error {}
         let signIn = try check(checks, .jiraSignIn)
         #expect(!signIn.ok)
         #expect(signIn.blocksStart)
-        #expect(!signIn.needsToken)
+        #expect(!signIn.needsSignIn)
         #expect(signIn.refusedByServer)
         #expect(signIn.detail == message)
-        #expect(signIn.fix == "Ask your Atlassian administrator to allow the Atlassian MCP server, or use an API token instead (Settings › Jira).")
+        #expect(signIn.fix == "Ask your Atlassian administrator to allow the Atlassian MCP server.")
     }
 
     @Test func test_mcpKeychainRefusedIsNotANewSignIn() async throws {
@@ -362,7 +298,7 @@ private struct TokenError: Error {}
         let checks = await (try makeMCPDoctor(fixture, jira: nil, credentials: { throw KeychainError.unexpected(-128) })).run()
         let signIn = try check(checks, .jiraSignIn)
         #expect(!signIn.ok)
-        #expect(!signIn.needsToken)
+        #expect(!signIn.needsSignIn)
         #expect(!signIn.refusedByServer)
         #expect(signIn.detail == "Keychain access was refused or failed (status -128)")
     }
@@ -374,7 +310,7 @@ private struct TokenError: Error {}
         let signIn = try check(checks, .jiraSignIn)
         #expect(!signIn.ok)
         #expect(!signIn.refusedByServer)
-        #expect(!signIn.needsToken)
+        #expect(!signIn.needsSignIn)
         #expect(signIn.detail == "Keychain access was refused or failed (status -25308)")
     }
 

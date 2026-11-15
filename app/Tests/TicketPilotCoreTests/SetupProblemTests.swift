@@ -10,8 +10,8 @@ import Testing
     static let outdated = HealthCheck(
         id: .plugin, ok: false, detail: "installed 0.1.2 · bundled 0.1.3", pluginState: .outdated(installed: "0.1.2", bundled: "0.1.3")
     )
-    static let noToken = HealthCheck(id: .jiraToken, ok: false, detail: "No Jira token", fix: "security …", blocksStart: true, needsToken: true)
-    static let keychain = HealthCheck(id: .jiraToken, ok: false, detail: "Keychain refused", fix: "Allow TicketPilot", blocksStart: true)
+    static let noSignIn = HealthCheck(id: .jiraSignIn, ok: false, detail: "Not connected to Atlassian", blocksStart: true, needsSignIn: true)
+    static let keychain = HealthCheck(id: .jiraSignIn, ok: false, detail: "Keychain refused", fix: "Allow TicketPilot", blocksStart: true)
     static let unreachable = HealthCheck(id: .jiraReachable, ok: false, detail: "Jira is unreachable", fix: "Check the network", blocksStart: true)
     static let repos = HealthCheck(id: .repoPaths, ok: false, detail: "Path not found for: ios, web", blockedRepos: ["ios", "web"])
     static let mcp = HealthCheck(id: .mcp, ok: false, detail: "Not connected: figma")
@@ -19,7 +19,7 @@ import Testing
     static let fine = HealthCheck(id: .jiraReachable, ok: true, detail: "https://jira")
 
     @Test func test_claudeMissingComesFirstAndOpensTheDocs() {
-        let all = [Self.disk, Self.repos, Self.unreachable, Self.noToken, Self.plugin, Self.claude]
+        let all = [Self.disk, Self.repos, Self.unreachable, Self.noSignIn, Self.plugin, Self.claude]
         #expect(SetupProblem.first(in: all) == SetupProblem(
             title: "Install Claude Code…",
             explanation: "Install Claude Code to start a ticket.",
@@ -28,7 +28,7 @@ import Testing
     }
 
     @Test func test_pluginMissingOffersToInstallIt() {
-        let problem = SetupProblem.first(in: [Self.noToken, Self.plugin])
+        let problem = SetupProblem.first(in: [Self.noSignIn, Self.plugin])
         #expect(problem == SetupProblem(
             title: "Install the Claude Code plugin…",
             explanation: "Install the Claude Code plugin to start a ticket.",
@@ -44,18 +44,18 @@ import Testing
             action: .installPlugin(state)
         ))
         // An update can wait: what blocks a run comes first.
-        #expect(SetupProblem.first(in: [Self.outdated, Self.noToken])?.action == .setJiraToken)
+        #expect(SetupProblem.first(in: [Self.outdated, Self.noSignIn])?.action == .connectAtlassian)
         #expect(SetupProblem.first(in: [Self.outdated, Self.repos])?.title == "Repository not found: ios, web…")
     }
 
-    @Test func test_missingTokenConnectsJira() {
-        let problem = SetupProblem.first(in: [Self.unreachable, Self.noToken])
-        #expect(problem == SetupProblem(title: "Connect Jira…", explanation: "Connect Jira to see your tickets here.", action: .setJiraToken))
+    @Test func test_missingSignInConnectsJira() {
+        let problem = SetupProblem.first(in: [Self.unreachable, Self.noSignIn])
+        #expect(problem == SetupProblem(title: "Connect Jira…", explanation: "Connect Jira to see your tickets here.", action: .connectAtlassian))
     }
 
     @Test func test_refusedKeychainConnectsJira() {
         let problem = SetupProblem.first(in: [Self.unreachable, Self.keychain])
-        #expect(problem == SetupProblem(title: "Connect Jira…", explanation: "Connect Jira to see your tickets here.", action: .setJiraToken))
+        #expect(problem == SetupProblem(title: "Connect Jira…", explanation: "Connect Jira to see your tickets here.", action: .connectAtlassian))
     }
 
     @Test func test_unreachableJiraChecksAgain() {
@@ -67,7 +67,7 @@ import Testing
         ))
         // A failed poll after a good check reads the same.
         #expect(SetupProblem.first(in: [Self.fine], jiraFailing: true) == problem)
-        // Not before the checks are in: a missing token must not read as unreachable meanwhile.
+        // Not before the checks are in: a missing sign-in must not read as unreachable meanwhile.
         #expect(SetupProblem.first(in: [], jiraFailing: true) == nil)
     }
 
@@ -99,7 +99,7 @@ import Testing
     }
 
     @Test func test_noReposAsksToAddOneAfterJira() {
-        #expect(SetupProblem.first(in: [Self.noToken], config: .noRepos)?.action == .setJiraToken)
+        #expect(SetupProblem.first(in: [Self.noSignIn], config: .noRepos)?.action == .connectAtlassian)
         #expect(SetupProblem.first(in: [Self.fine, Self.outdated], config: .noRepos) == SetupProblem(
             title: "Add your repositories…",
             explanation: "Add the repositories you work in.",
@@ -108,7 +108,7 @@ import Testing
     }
 
     @Test func test_invalidConfigExplainsWhatIsWrongBeforeJira() {
-        let problem = SetupProblem.first(in: [Self.noToken], config: .invalid("/c.json: bad JSON"))
+        let problem = SetupProblem.first(in: [Self.noSignIn], config: .invalid("/c.json: bad JSON"))
         #expect(problem == SetupProblem(
             title: "Fix the config…",
             explanation: "Fix your config to get started.",
@@ -122,7 +122,7 @@ import Testing
     }
 
     @Test func test_theButtonEndsWithAnArrowInsteadOfAnEllipsis() {
-        #expect(SetupProblem(title: "Connect Jira…", explanation: "", action: .setJiraToken).buttonTitle == "Connect Jira →")
+        #expect(SetupProblem(title: "Connect Jira…", explanation: "", action: .connectAtlassian).buttonTitle == "Connect Jira →")
         #expect(SetupProblem(title: "Check again", explanation: "", action: .checkAgain).buttonTitle == "Check again →")
     }
 
@@ -134,7 +134,7 @@ import Testing
     // MARK: - Atlassian MCP
 
     static let notSignedIn = HealthCheck(
-        id: .jiraSignIn, ok: false, detail: "Not connected to Atlassian", blocksStart: true, needsToken: true
+        id: .jiraSignIn, ok: false, detail: "Not connected to Atlassian", blocksStart: true, needsSignIn: true
     )
 
     @Test func test_notSignedInConnectsJiraThroughAtlassian() {

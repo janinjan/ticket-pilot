@@ -248,14 +248,11 @@ class OptionalKeyTests(unittest.TestCase):
                 problems = config.validate(config.load(write_json(tmp, {"repos": [repo]})))
                 self.assertIn("repos[android].guidelines must be a list of paths", problems, wrong)
 
-    def test_jira_auth_must_be_mcp_or_api_token(self):
+    def test_an_old_jira_auth_key_is_ignored(self):
+        # Jira is only read through the Atlassian sign-in: an older config's auth key changes nothing.
         jira = {"site": "https://example.atlassian.net", "email": "a@example.com", "keychain_service": "s"}
-        for value in ("mcp", "api_token"):
+        for value in ("mcp", "api_token", "anything"):
             self.assertEqual(self.problems_for({"repos": [], "jira": dict(jira, auth=value)}), [])
-        self.assertEqual(self.problems_for({"repos": [], "jira": jira}), [])
-        for value in ("oauth", 1, None):
-            problems = self.problems_for({"repos": [], "jira": dict(jira, auth=value)})
-            self.assertIn("jira.auth must be 'mcp' or 'api_token'", problems)
 
     def test_example_config_documents_optional_keys(self):
         data = json.loads((ROOT / "config.example.json").read_text())

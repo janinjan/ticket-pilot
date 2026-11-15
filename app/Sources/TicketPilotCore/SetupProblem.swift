@@ -6,8 +6,6 @@ public struct SetupProblem: Equatable, Sendable {
         case openURL(URL)
         /// Copies the check's fix command.
         case copyFix(HealthCheck)
-        /// Asks for the Jira token.
-        case setJiraToken
         /// Signs in to Atlassian in the browser, for the Atlassian MCP server.
         case connectAtlassian
         /// Shows what is wrong and how to fix it.
@@ -95,9 +93,6 @@ public struct SetupProblem: Equatable, Sendable {
             )
         case .noRepos, nil:
             break
-        }
-        if failed(.jiraToken) != nil {
-            return SetupProblem(title: "Connect Jira…", explanation: "Connect Jira to see your tickets here.", action: .setJiraToken)
         }
         if let signIn = failed(.jiraSignIn) {
             if signIn.refusedByServer {
