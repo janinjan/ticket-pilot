@@ -46,6 +46,16 @@ final class AppModel {
     private(set) var configuredTerminal: String?
     /// False until Jira first answered: until then the panel claims nothing about the tickets.
     private(set) var jiraAnswered = false
+    /// From "Refresh" until Jira answered, or failed to.
+    private(set) var refreshingTickets = false
+    /// When Jira last answered with the assigned tickets.
+    private var ticketsUpdatedAt: Date?
+    /// Moved on each minute, so that "Tickets updated N min ago" follows the time.
+    private var clock = Date()
+    /// "Tickets updated 3 min ago", or "Updating tickets…": what the refresh button reads, and when.
+    var ticketsFreshness: String? {
+        TicketsFreshness.text(lastUpdate: ticketsUpdatedAt, refreshing: refreshingTickets, now: clock)
+    }
     private(set) var runs: [Run] = []
     private(set) var acknowledged: Set<String> = []
     /// The Jira summary of each assigned ticket, by key: the title of a run that has none of its own.
@@ -191,6 +201,7 @@ final class AppModel {
         clockTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(60))
+                self?.clock = Date()
                 self?.updatePresentation()
             }
         }
@@ -206,6 +217,7 @@ final class AppModel {
         // checked, so a first launch starts with them. Without a config, a stored sign-in writes it.
         guard let config, !configIsBroken else {
             poller?.stop()
+            refreshingTickets = false
             jiraFailing = true
             if configProblem == .missing, !jiraSetupTried {
                 jiraSetupTried = true
@@ -241,6 +253,7 @@ final class AppModel {
                 poller?.start(jira: jira, pollMinutes: config.pollMinutes)
             } else {
                 poller?.stop()
+                refreshingTickets = false
                 jiraFailing = true
             }
             let doctor = makeDoctor(config: config, jira: jira, signInLookup: { try token.get() })
@@ -377,13 +390,26 @@ final class AppModel {
 
     // MARK: - Jira
 
+    /// Reads the assigned tickets again now; without a Jira to read (no sign-in, no config), checks the setup
+    /// again, which polls once it can.
+    func refreshTickets() {
+        guard poller?.pollNow() == true else {
+            runDoctor()
+            return
+        }
+        refreshingTickets = true
+    }
+
     private func apply(_ outcome: PollOutcome, from jira: any JiraSearching) async {
+        refreshingTickets = false
         switch outcome {
         case .failed:
             jiraFailing = true
         case let .succeeded(issues, newTickets):
             jiraFailing = false
             jiraAnswered = true
+            clock = Date()
+            ticketsUpdatedAt = clock
             self.issues = issues
             summaries = Dictionary(issues.map { ($0.key, $0.summary) }, uniquingKeysWith: { first, _ in first })
             updatePresentation()

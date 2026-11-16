@@ -104,9 +104,38 @@ struct PanelView: View {
         .padding(.vertical, 6)
     }
 
-    /// Quit, always in sight, as in the other menu bar apps.
+    /// Reads the assigned tickets again at once (⌘R); a spinner while Jira answers. The panel stays open.
+    @ViewBuilder
+    private var refreshButton: some View {
+        let busy = model.refreshingTickets || model.checkingSetup
+        Button(action: model.refreshTickets) {
+            if busy {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Image(systemName: "arrow.clockwise")
+            }
+        }
+        .buttonStyle(.borderless)
+        .disabled(busy)
+        .keyboardShortcut("r")
+        .frame(minWidth: 28, minHeight: 28)
+        .contentShape(Rectangle())
+        .help("Refresh the tickets assigned to you")
+        .accessibilityLabel(busy ? "Refreshing the tickets" : "Refresh the tickets")
+    }
+
+    /// The refresh button and when the tickets were last read; Quit, always in sight, as in the other menu
+    /// bar apps.
     private var footer: some View {
-        HStack {
+        HStack(spacing: 2) {
+            refreshButton
+            if let freshness = model.ticketsFreshness {
+                Text(freshness)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
             Spacer()
             Button("Quit") { NSApplication.shared.terminate(nil) }
                 .buttonStyle(.borderless)
@@ -114,8 +143,9 @@ struct PanelView: View {
                 .foregroundStyle(.secondary)
                 .keyboardShortcut("q")
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.leading, 4)
+        .padding(.trailing, 12)
+        .padding(.vertical, 2)
     }
 
     /// What the user must act on: one line for tickets that need them, or a banner that holds the setup's
