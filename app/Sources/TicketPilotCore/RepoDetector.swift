@@ -151,7 +151,7 @@ public enum RepoDetector {
 
     /// `gerrit` for Gerrit's SSH port, its authenticated HTTP path (`/a/`) or a host named after it
     /// (`gerrit…`, `review.…`); `github` for GitHub and GitHub Enterprise (`*.ghe.com`); else nil.
-    private static func review(ofRemote url: String) -> String? {
+    static func review(ofRemote url: String) -> String? {
         let lowered = url.lowercased()
         if lowered.contains(":29418") { return "gerrit" }
         let parsed = lowered.contains("://") ? URL(string: lowered) : nil

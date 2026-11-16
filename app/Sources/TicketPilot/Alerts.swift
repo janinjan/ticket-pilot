@@ -12,12 +12,13 @@ enum Alerts {
         alert.runModal()
     }
 
-    /// Asks before doing what `text` describes; true when the user chose `button`.
-    static func confirm(_ text: AlertText, button: String) -> Bool {
+    /// Asks before doing what `text` describes; true when the user chose `button`. A `destructive` button
+    /// is shown in red.
+    static func confirm(_ text: AlertText, button: String, destructive: Bool = false) -> Bool {
         let alert = NSAlert()
         alert.messageText = text.title
         alert.informativeText = text.message
-        alert.addButton(withTitle: button)
+        alert.addButton(withTitle: button).hasDestructiveAction = destructive
         alert.addButton(withTitle: "Cancel")
         NSApp.activate()
         return alert.runModal() == .alertFirstButtonReturn

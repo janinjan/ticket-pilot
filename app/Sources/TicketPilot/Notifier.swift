@@ -106,6 +106,14 @@ struct Notifier {
         post(content, identifier: identifier)
     }
 
+    /// A removal ends with the panel closed: this says it is done. Silent.
+    func notifyRemoved(title: String, body: String?) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        if let body { content.body = body }
+        post(content, identifier: "removed-\(UUID().uuidString)")
+    }
+
     func notifyCopied() {
         let content = UNMutableNotificationContent()
         content.title = "Copied to the clipboard"

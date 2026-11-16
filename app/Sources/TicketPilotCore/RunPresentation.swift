@@ -160,9 +160,9 @@ public struct RunLine: Equatable, Sendable {
         stepNames.indices.contains(number - 1) ? stepLabel(stepNames[number - 1]) : "Step \(number)"
     }
 
-    /// "Show in Finder · <size>", the size left out while unknown; nil without a worktree.
+    /// "Show in Finder · <size>", the size left out while unknown; nil without a worktree on disk.
     public static func showInFinderTitle(_ run: Run, bytes: Int64?) -> String? {
-        guard run.worktree != nil else { return nil }
+        guard Releasable.worktreeExists(run) else { return nil }
         guard let bytes = sizeLabel(bytes: bytes) else { return "Show in Finder" }
         return "Show in Finder · " + bytes
     }

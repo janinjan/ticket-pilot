@@ -233,7 +233,9 @@ import Testing
     @Test func test_showInFinderNamesTheSizeWhenKnown() {
         var run = Self.run()
         #expect(RunLine.showInFinderTitle(run, bytes: 5_000_000) == nil)
-        run.worktree = "/Users/me/wt/ios"
+        run.worktree = "/no/such/worktree"
+        #expect(RunLine.showInFinderTitle(run, bytes: 5_000_000) == nil)
+        run.worktree = FileManager.default.temporaryDirectory.path
         let size = ByteCountFormatter.string(fromByteCount: 5_000_000, countStyle: .file)
         #expect(RunLine.showInFinderTitle(run, bytes: 5_000_000) == "Show in Finder · \(size)")
         #expect(RunLine.showInFinderTitle(run, bytes: nil) == "Show in Finder")
