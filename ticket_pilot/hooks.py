@@ -139,6 +139,13 @@ def _apply(event: dict, run: dict) -> None:
         if run.get("status") != "done":
             run["status"] = "running"
             run["waiting"] = None
+    elif name == "Stop" and _has_background_work(event.get("transcript_path")):
+        # The turn ends on agents, a build or a monitor still running: Claude resumes by itself when they
+        # finish, so the run is not waiting for the user. An earlier plain end of turn is no longer true.
+        session["state"] = "running"
+        if run.get("status") != "done" and _is_plain_wait(run):
+            run["status"] = "running"
+            run["waiting"] = None
     elif name == "Stop":
         session["state"] = "waiting"
         if run.get("status") != "done" and not run.get("waiting"):
@@ -157,6 +164,93 @@ def _apply(event: dict, run: dict) -> None:
     else:
         return
     runs.save(run)
+
+
+def _is_plain_wait(run: dict) -> bool:
+    waiting = run.get("waiting")
+    return isinstance(waiting, dict) and waiting.get("kind") == runs.INPUT_KIND
+
+
+# What a tool answers when it starts work in the background (an agent, a command, a monitor); the work
+# then ends with a task notification that names the tool call.
+BACKGROUND_STARTED = re.compile(
+    r"^\s*(Async agent launched|Command running in background|Monitor started|Workflow started)", re.I
+)
+TASK_ENDED = re.compile(
+    r"<task-notification>.*?<tool-use-id>([^<\s]+)</tool-use-id>.*?<status>(\w+)</status>", re.S
+)
+# Background work started longer ago than this no longer holds the run back, should its notification
+# never come.
+BACKGROUND_MAX_AGE = timedelta(hours=2)
+
+
+def _texts(value):
+    """Every string inside a decoded JSON value."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, list):
+        for item in value:
+            yield from _texts(item)
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _texts(item)
+
+
+def _result_text(content) -> str:
+    """A tool result's text: a string, or the first text block of a list."""
+    if isinstance(content, str):
+        return content
+    for block in content if isinstance(content, list) else []:
+        if isinstance(block, dict) and isinstance(block.get("text"), str):
+            return block["text"]
+    return ""
+
+
+def _timestamp(value) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        # Python 3.9 reads neither the "Z" nor milliseconds of other than 3 or 6 digits.
+        return datetime.strptime(value[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _has_background_work(transcript_path) -> bool:
+    """The session's transcript has background work started and not ended yet. Any doubt (no transcript,
+    unreadable) reads as none: the run then waits for the user, as before."""
+    if not isinstance(transcript_path, str) or not transcript_path:
+        return False
+    started: dict[str, datetime | None] = {}
+    ended: set[str] = set()
+    try:
+        with open(transcript_path, encoding="utf-8") as handle:
+            for line in handle:
+                if "tool_result" not in line and "<task-notification>" not in line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(entry, dict) or entry.get("type") == "assistant":
+                    continue
+                message = entry.get("message")
+                content = message.get("content") if isinstance(message, dict) else None
+                for block in content if isinstance(content, list) else []:
+                    if not isinstance(block, dict) or block.get("type") != "tool_result":
+                        continue
+                    if BACKGROUND_STARTED.match(_result_text(block.get("content"))) and isinstance(block.get("tool_use_id"), str):
+                        started[block["tool_use_id"]] = _timestamp(entry.get("timestamp"))
+                for text in _texts(entry):
+                    for match in TASK_ENDED.finditer(text):
+                        if match.group(2).lower() != "running":
+                            ended.add(match.group(1))
+    except OSError:
+        return False
+    cutoff = datetime.now(timezone.utc) - BACKGROUND_MAX_AGE
+    return any(
+        tool_id not in ended and (at is None or at >= cutoff) for tool_id, at in started.items()
+    )
 
 
 AUTONOMY_REMINDER = (

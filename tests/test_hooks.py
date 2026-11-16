@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 from ticket_pilot import cli, hooks, paths, runs
@@ -229,6 +230,108 @@ class BoundSessionTests(HooksTestCase):
         run = runs.load("ABC-1--app")
         self.assertEqual(run["waiting"]["kind"], "go")
         self.assertEqual(run["waiting"]["text"], "plan ready")
+
+    def transcript(self, *entries):
+        """A session transcript, one JSON entry per line; returns its path."""
+        path = os.path.join(self._tmp.name, "transcript-%d.jsonl" % len(os.listdir(self._tmp.name)))
+        with open(path, "w", encoding="utf-8") as handle:
+            for entry in entries:
+                handle.write(json.dumps(entry) + "\n")
+        return path
+
+    @staticmethod
+    def launched(tool_id, text, timestamp=None):
+        """The tool result of a call that started work in the background."""
+        return {
+            "type": "user",
+            "timestamp": timestamp or runs.now(),
+            "message": {"content": [{"type": "tool_result", "tool_use_id": tool_id, "content": text}]},
+        }
+
+    @staticmethod
+    def task_ended(tool_id, status="completed"):
+        return {
+            "type": "user",
+            "timestamp": runs.now(),
+            "message": {"content": (
+                "<task-notification>\n<task-id>t</task-id>\n<tool-use-id>%s</tool-use-id>\n"
+                "<output-file>/tmp/t.output</output-file>\n<status>%s</status>\n</task-notification>"
+            ) % (tool_id, status)},
+        }
+
+    def test_stop_with_background_work_running_keeps_the_run_running(self):
+        agent = [{"type": "text", "text": "Async agent launched successfully. agentId: a1"}]
+        for started in (
+            self.launched("toolu_a", agent),
+            self.launched("toolu_b", "Command running in background with ID: b1."),
+            self.launched("toolu_m", [{"type": "text", "text": "Monitor started (task m1, expires in 30m)"}]),
+        ):
+            with self.subTest(started=started):
+                hooks.handle(self.event("Stop", transcript_path=self.transcript(started)))
+                run = runs.load("ABC-1--app")
+                self.assertEqual(run["status"], "running")
+                self.assertIsNone(run["waiting"])
+                self.assertEqual(run["session"]["state"], "running")
+
+    def test_stop_after_the_background_work_ended_waits_for_input(self):
+        path = self.transcript(
+            self.launched("toolu_a", "Async agent launched successfully."),
+            self.task_ended("toolu_a"),
+            self.launched("toolu_b", "Command running in background with ID: b1."),
+            self.task_ended("toolu_b", status="failed"),
+        )
+        hooks.handle(self.event("Stop", transcript_path=path))
+        run = runs.load("ABC-1--app")
+        self.assertEqual(run["status"], "waiting")
+        self.assertEqual(run["waiting"]["kind"], "input")
+
+    def test_a_monitor_event_does_not_end_its_monitor(self):
+        path = self.transcript(
+            self.launched("toolu_m", "Monitor started (task m1)"),
+            self.task_ended("toolu_m", status="running"),
+        )
+        hooks.handle(self.event("Stop", transcript_path=path))
+        self.assertEqual(runs.load("ABC-1--app")["status"], "running")
+
+    def test_a_foreground_result_is_no_background_work(self):
+        path = self.transcript(self.launched("toolu_a", "The agent found three files."))
+        hooks.handle(self.event("Stop", transcript_path=path))
+        self.assertEqual(runs.load("ABC-1--app")["status"], "waiting")
+
+    def test_background_work_never_notified_stops_holding_the_run_back(self):
+        old = (datetime.now(timezone.utc) - hooks.BACKGROUND_MAX_AGE - timedelta(minutes=1))
+        path = self.transcript(
+            self.launched("toolu_a", "Async agent launched.", timestamp=old.strftime("%Y-%m-%dT%H:%M:%S.123Z"))
+        )
+        hooks.handle(self.event("Stop", transcript_path=path))
+        self.assertEqual(runs.load("ABC-1--app")["status"], "waiting")
+
+    def test_stop_without_a_readable_transcript_waits_for_input(self):
+        for path in (None, "", os.path.join(self._tmp.name, "missing.jsonl")):
+            with self.subTest(path=path):
+                hooks.handle(self.event("UserPromptSubmit", prompt="ok"))
+                hooks.handle(self.event("Stop", transcript_path=path))
+                self.assertEqual(runs.load("ABC-1--app")["status"], "waiting")
+
+    def test_background_work_clears_an_earlier_plain_wait_but_not_a_question(self):
+        hooks.handle(self.event("Stop"))
+        self.assertEqual(runs.load("ABC-1--app")["waiting"]["kind"], "input")
+        path = self.transcript(self.launched("toolu_a", "Async agent launched."))
+        hooks.handle(self.event("Stop", transcript_path=path))
+        self.assertEqual(runs.load("ABC-1--app")["status"], "running")
+        runs.set_waiting("ABC-1--app", "go", "plan ready")
+        hooks.handle(self.event("Stop", transcript_path=path))
+        run = runs.load("ABC-1--app")
+        self.assertEqual(run["status"], "waiting")
+        self.assertEqual(run["waiting"]["kind"], "go")
+
+    def test_background_work_keeps_a_done_run_done(self):
+        runs.set_done("ABC-1--app")
+        path = self.transcript(self.launched("toolu_a", "Async agent launched."))
+        hooks.handle(self.event("Stop", transcript_path=path))
+        run = runs.load("ABC-1--app")
+        self.assertEqual(run["status"], "done")
+        self.assertEqual(run["waiting"]["kind"], "report")
 
     def test_stop_keeps_done_run_done(self):
         runs.set_done("ABC-1--app")
