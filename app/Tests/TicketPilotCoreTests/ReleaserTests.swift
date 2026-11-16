@@ -98,6 +98,142 @@ import Testing
         #expect(ReleasePlan.make(run: noWorktree, runsDirectory: f.runsDirectory).question == "Remove ABC-1 · ios from the list?")
     }
 
+    /// A removal that kept the branch has deleted the worktree already: what is left is said, not the
+    /// worktree again.
+    @Test func test_aWorktreeAlreadyGoneIsNoLongerOffered() throws {
+        let f = try makeFixture()
+        defer { f.cleanUp() }
+        try FileManager.default.removeItem(at: f.worktree)
+        #expect(!Releasable.worktreeExists(f.run))
+        #expect(Releasable.actionTitle(for: f.run) == "Remove from the list…")
+        let plan = ReleasePlan.make(run: f.run, runsDirectory: f.runsDirectory)
+        #expect(plan.question == "Remove ABC-1 · ios from the list?")
+        #expect(plan.lines == ["Local branch: feature", "Run state: \(f.runFile.path)"])
+        try Releaser(runner: SystemProcessRunner()).release(plan)
+        #expect(try f.branches().isEmpty)
+        #expect(!f.fileManager.fileExists(atPath: f.runFile.path))
+    }
+
+    @Test func test_anUnmergedBranchIsDeletedOnceTheUserChoseTo() throws {
+        let f = try makeFixture()
+        defer { f.cleanUp() }
+        try f.commitFile("work.txt", in: f.worktree)
+        let plan = ReleasePlan.make(run: f.run, runsDirectory: f.runsDirectory, mainBranch: "main")
+        let releaser = Releaser(runner: SystemProcessRunner())
+        #expect(throws: ReleaseError.self) { try releaser.release(plan) }
+        try releaser.release(plan, forceBranches: true)
+        #expect(try f.branches().isEmpty)
+        #expect(!f.fileManager.fileExists(atPath: f.runFile.path))
+    }
+
+    // MARK: - Up for review on Gerrit
+
+    /// Runs git for real; answers `ssh` (the Gerrit query) with `gerrit`, and records its arguments.
+    final class GerritRunner: ProcessRunning, @unchecked Sendable {
+        var answer: (String) -> String
+        private(set) var queries: [[String]] = []
+
+        init(answer: @escaping (String) -> String) {
+            self.answer = answer
+        }
+
+        func run(_ executable: String, _ arguments: [String], currentDirectory: URL?) throws -> ProcessResult {
+            guard executable == "/usr/bin/ssh" else {
+                return try SystemProcessRunner().run(executable, arguments, currentDirectory: currentDirectory)
+            }
+            queries.append(arguments)
+            let changeID = String(arguments.last?.dropFirst("change:".count) ?? "")
+            return ProcessResult(status: 0, output: answer(changeID), error: "")
+        }
+    }
+
+    private static let changeID = "I069290230d6d737876c3c78f83e9be77b4bb3a7e"
+
+    /// A fixture whose `origin` is a Gerrit server, the main branch on it, and one commit of the branch
+    /// with a Change-Id; returns that commit.
+    private func makeGerritFixture() throws -> (Fixture, commit: String) {
+        let f = try makeFixture()
+        try f.git(["remote", "add", "origin", "ssh://me@review.example.com:29418/ios/app"])
+        try f.git(["update-ref", "refs/remotes/origin/main", "main"])
+        try Data("work".utf8).write(to: f.worktree.appendingPathComponent("work.txt"))
+        try f.git(["add", "work.txt"], in: f.worktree)
+        try f.git(["commit", "-q", "-m", "work\n\nChange-Id: \(Self.changeID)"], in: f.worktree)
+        let commit = try f.git(["rev-parse", "HEAD"], in: f.worktree).output.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (f, commit)
+    }
+
+    private static func queryOutput(revisions: [String]) -> String {
+        let patchSets = revisions.enumerated().map { #"{"number":\#($0.offset + 1),"revision":"\#($0.element)"}"# }
+        return #"{"project":"ios/app","patchSets":[\#(patchSets.joined(separator: ","))]}"# + "\n"
+            + #"{"type":"stats","rowCount":1}"# + "\n"
+    }
+
+    @Test func test_aBranchUpForReviewOnGerritIsDeleted() throws {
+        let (f, commit) = try makeGerritFixture()
+        defer { f.cleanUp() }
+        let runner = GerritRunner { _ in Self.queryOutput(revisions: ["0000", commit]) }
+        let plan = ReleasePlan.make(run: f.run, runsDirectory: f.runsDirectory, mainBranch: "main")
+        try Releaser(runner: runner).release(plan)
+        #expect(try f.branches().isEmpty)
+        #expect(!f.fileManager.fileExists(atPath: f.runFile.path))
+        let query = try #require(runner.queries.first)
+        #expect(query.contains("BatchMode=yes"))
+        #expect(Array(query.suffix(8)) == [
+            "-p", "29418", "me@review.example.com", "gerrit", "query", "--format=JSON", "--patch-sets",
+            "change:\(Self.changeID)",
+        ])
+    }
+
+    @Test func test_aBranchWhoseCommitGerritDoesNotHaveIsKept() throws {
+        let (f, _) = try makeGerritFixture()
+        defer { f.cleanUp() }
+        // Amended after the push: the change has an older patch set only.
+        let runner = GerritRunner { _ in Self.queryOutput(revisions: ["0000"]) }
+        let plan = ReleasePlan.make(run: f.run, runsDirectory: f.runsDirectory, mainBranch: "main")
+        #expect(throws: ReleaseError.self) { try Releaser(runner: runner).release(plan) }
+        #expect(!(try f.branches().isEmpty))
+        #expect(f.fileManager.fileExists(atPath: f.runFile.path))
+    }
+
+    @Test func test_aBranchIsKeptWhenGerritCannotBeAsked() throws {
+        let (f, _) = try makeGerritFixture()
+        defer { f.cleanUp() }
+        let runner = GerritRunner { _ in "" }
+        let plan = ReleasePlan.make(run: f.run, runsDirectory: f.runsDirectory, mainBranch: "main")
+        #expect(throws: ReleaseError.self) { try Releaser(runner: runner).release(plan) }
+        #expect(!(try f.branches().isEmpty))
+    }
+
+    @Test func test_aCommitWithoutChangeIDKeepsTheBranch() throws {
+        let (f, _) = try makeGerritFixture()
+        defer { f.cleanUp() }
+        try f.commitFile("more.txt", in: f.worktree)
+        let runner = GerritRunner { _ in Self.queryOutput(revisions: []) }
+        let plan = ReleasePlan.make(run: f.run, runsDirectory: f.runsDirectory, mainBranch: "main")
+        #expect(throws: ReleaseError.self) { try Releaser(runner: runner).release(plan) }
+        #expect(!(try f.branches().isEmpty))
+    }
+
+    @Test func test_gerritServerOnlyForAnSSHGerritRemote() {
+        #expect(GerritServer(remote: "ssh://me@review.example.com:29418/ios/app\n")
+            == GerritServer(destination: "me@review.example.com", port: 29418))
+        #expect(GerritServer(remote: "ssh://gerrit.example.com/ios/app")
+            == GerritServer(destination: "gerrit.example.com", port: nil))
+        #expect(GerritServer(remote: "https://review.example.com/a/ios/app") == nil)
+        #expect(GerritServer(remote: "git@github.com:me/app.git") == nil)
+        #expect(GerritServer(remote: "ssh://git@github.com/me/app.git") == nil)
+    }
+
+    @Test func test_onlyAChangeIDIsSentToGerrit() {
+        #expect(GerritServer.isChangeID(Self.changeID))
+        #expect(!GerritServer.isChangeID("I0692; rm -rf ~"))
+        #expect(!GerritServer.isChangeID(""))
+        let runner = GerritRunner { _ in Self.queryOutput(revisions: ["abc"]) }
+        let server = GerritServer(destination: "review.example.com", port: 29418)
+        #expect(server.revisions(ofChange: "I1 OR project:x", runner: runner).isEmpty)
+        #expect(runner.queries.isEmpty)
+    }
+
     @Test func test_releasesWorktreeBranchRunFileAndReport() throws {
         let f = try makeFixture()
         defer { f.cleanUp() }
@@ -215,17 +351,18 @@ import Testing
         defer { f.cleanUp() }
         try f.git(["commit", "-q", "--allow-empty", "-m", "own work"], in: f.worktree)
         let plan = ReleasePlan.make(run: f.run, runsDirectory: f.runsDirectory)
-        let command = "git -C '\(f.repo.path)' branch -D 'feature'"
         do {
             try Releaser(runner: SystemProcessRunner()).release(plan)
             Issue.record("expected failure")
         } catch {
-            guard case .branchNotDeleted(let message, let shown) = error else {
+            guard case .branchNotDeleted(let branch, let message) = error else {
                 Issue.record("unexpected error \(error)")
                 return
             }
+            #expect(branch == "feature")
             #expect(!message.isEmpty)
-            #expect(shown == command)
+            // Git's hints name `branch -D`: the alert's button replaces them.
+            #expect(!message.contains("hint:"))
         }
         #expect(!f.fileManager.fileExists(atPath: f.worktree.path))
         #expect(!(try f.branches().isEmpty))
@@ -365,11 +502,12 @@ import Testing
         #expect(diskUsage(of: f.root.appendingPathComponent("missing").path, runner: SystemProcessRunner()) == nil)
     }
 
-    @Test func test_alertTextGivesTheCommandForAnUnmergedBranch() {
-        let branch = ReleaseError.branchNotDeleted(message: "not fully merged", command: "git -C '/r' branch -D 'f'")
-        #expect(branch.alertText.title == "The branch was kept")
-        #expect(branch.alertText.message.hasPrefix("not fully merged"))
-        #expect(branch.alertText.message.hasSuffix("git -C '/r' branch -D 'f'"))
+    @Test func test_alertTextTellsWhyAnUnmergedBranchIsKept() {
+        let branch = ReleaseError.branchNotDeleted(branch: "f", message: "not fully merged")
+        #expect(branch.alertText.title == "The branch f was kept")
+        #expect(branch.alertText.message.hasPrefix("The worktree is removed."))
+        #expect(branch.alertText.message.contains("neither in the main branch nor up for review"))
+        #expect(branch.alertText.message.hasSuffix("not fully merged"))
         let worktree = ReleaseError.worktreeNotRemoved(message: "contains modified files")
         #expect(worktree.alertText == AlertText(title: "The worktree was kept", message: "contains modified files"))
     }

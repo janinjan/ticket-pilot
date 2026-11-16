@@ -24,13 +24,16 @@ public struct ReleasePlan: Equatable, Sendable {
             guard let branch, !branch.isEmpty, !branches.contains(branch) else { continue }
             branches.append(branch)
         }
+        // A worktree already deleted (by an earlier try, or by hand) is no longer named: only its
+        // registration is pruned.
+        let present = Releasable.worktreeExists(run)
         var lines: [String] = []
-        if let worktree = run.worktree { lines.append("Worktree: \(worktree)") }
+        if present, let worktree = run.worktree { lines.append("Worktree: \(worktree)") }
         lines += branches.map { "Local branch: \($0)" }
         lines.append("Run state: \(runFile.path)")
-        let question = run.worktree == nil
-            ? "Remove \(run.key) · \(run.repo) from the list?"
-            : "Remove the worktree of \(run.key) · \(run.repo)?"
+        let question = present
+            ? "Remove the worktree of \(run.key) · \(run.repo)?"
+            : "Remove \(run.key) · \(run.repo) from the list?"
         return ReleasePlan(
             runID: run.id, repoPath: run.repoPath, worktree: run.worktree, branches: branches,
             runFile: runFile, mainBranch: mainBranch, lines: lines, question: question
@@ -39,10 +42,15 @@ public struct ReleasePlan: Equatable, Sendable {
 }
 
 public enum Releasable {
-    /// The card's menu item: "Remove worktree…", or "Remove from the list…" for a run that never had one
-    /// (stopped before step 2, for a ticket already done).
+    /// The card's menu item: "Remove worktree…", or "Remove from the list…" for a run whose worktree is
+    /// gone or never was (stopped before step 2, for a ticket already done).
     public static func actionTitle(for run: Run) -> String {
-        run.worktree == nil ? "Remove from the list…" : "Remove worktree…"
+        worktreeExists(run) ? "Remove worktree…" : "Remove from the list…"
+    }
+
+    /// The run's worktree folder is still on disk.
+    public static func worktreeExists(_ run: Run) -> Bool {
+        run.worktree.map { FileManager.default.fileExists(atPath: $0) } ?? false
     }
 
     /// Runs that are finished, or whose ticket is Done in Jira (a run left before its end).
@@ -53,8 +61,8 @@ public enum Releasable {
 
 public enum ReleaseError: Error, Equatable {
     case worktreeNotRemoved(message: String)
-    /// `command` is the forced deletion, shown so the user can run it themselves.
-    case branchNotDeleted(message: String, command: String)
+    /// The branch has commits neither merged nor up for review; the alert offers to delete it anyway.
+    case branchNotDeleted(branch: String, message: String)
     case runFileNotRemoved(message: String)
     /// The branch is the repo's main branch or the one checked out in the main repo: nothing is deleted.
     case protectedBranch(branch: String)
@@ -76,16 +84,17 @@ extension ReleaseError {
     static let retryHint = "\n\nSome files could not be deleted: an app (Xcode, a build) may still be using the "
         + "worktree. Quit it, then choose Remove worktree again."
 
-    /// What the failure alert says: why nothing more was deleted, and for an unmerged
-    /// branch the command to run yourself.
+    /// What the failure alert says: why nothing more was deleted. For an unmerged branch, the alert also
+    /// offers "Delete Anyway" (`AppModel.release`).
     public var alertText: AlertText {
         switch self {
         case let .worktreeNotRemoved(message):
             AlertText(title: "The worktree was kept", message: message)
-        case let .branchNotDeleted(message, command):
+        case let .branchNotDeleted(branch, message):
             AlertText(
-                title: "The branch was kept",
-                message: message + "\n\nTo delete it anyway, run:\n" + command
+                title: "The branch \(branch) was kept",
+                message: "The worktree is removed. The branch has commits that are neither in the main branch "
+                    + "nor up for review: deleting it loses them.\n\n" + message
             )
         case let .runFileNotRemoved(message):
             AlertText(title: "The run file was kept", message: message)
@@ -101,9 +110,10 @@ extension ReleaseError {
 
 /// Removes a worktree, its branches and the run file, in that order, stopping at the first failure.
 /// Never loses work: git refuses a dirty worktree (`worktree remove`), and a branch is deleted only when
-/// `origin/<main branch>` has all its commits by content (merged under other hashes, as Gerrit does), or
-/// when git itself sees it merged (`branch -d`). Refuses up front, deleting nothing, when a branch is the
-/// main branch or the one checked out in the repo.
+/// `origin/<main branch>` has all its commits by content (merged under other hashes, as Gerrit does), when
+/// each commit not on `origin` is a patch set on the Gerrit server `origin` points to (up for review), or
+/// when git itself sees it merged (`branch -d`); `forceBranches` deletes it anyway, once the user chose to.
+/// Refuses up front, deleting nothing, when a branch is the main branch or the one checked out in the repo.
 public struct Releaser: Sendable {
     private static let git = "/usr/bin/git"
     private static let mainBranchNames: Set<String> = ["main", "master"]
@@ -113,7 +123,7 @@ public struct Releaser: Sendable {
         self.runner = runner
     }
 
-    public func release(_ plan: ReleasePlan) throws(ReleaseError) {
+    public func release(_ plan: ReleasePlan, forceBranches: Bool = false) throws(ReleaseError) {
         if let branch = plan.branches.first(where: { isProtected($0, plan: plan) }) {
             throw .protectedBranch(branch: branch)
         }
@@ -151,11 +161,13 @@ public struct Releaser: Sendable {
         }
         // A branch already deleted (with the `branch -D` the alert shows) only needs the run file removed.
         for branch in plan.branches where branchExists(branch, repoPath: plan.repoPath) {
-            let delete = isMergedByContent(branch, plan: plan) ? "-D" : "-d"
-            let result = execute(["-C", plan.repoPath, "branch", delete, "--", branch])
+            let safe = forceBranches || isMergedByContent(branch, plan: plan) || isUpForReview(branch, plan: plan)
+            let result = execute(["-C", plan.repoPath, "branch", safe ? "-D" : "-d", "--", branch])
             guard result.status == 0 else {
-                let command = "git -C \(SessionCommand.quote(plan.repoPath)) branch -D \(SessionCommand.quote(branch))"
-                throw .branchNotDeleted(message: result.error, command: command)
+                // Git's hints name `branch -D`: the alert offers it as a button.
+                let message = result.error.split(whereSeparator: \.isNewline)
+                    .filter { !$0.hasPrefix("hint:") }.joined(separator: "\n")
+                throw .branchNotDeleted(branch: branch, message: message)
             }
         }
         do {
@@ -222,6 +234,27 @@ public struct Releaser: Sendable {
             "origin/\(mainBranch)...refs/heads/\(branch)",
         ])
         return result.status == 0 && result.output.trimmingCharacters(in: .whitespacesAndNewlines) == "0"
+    }
+
+    /// Each commit of `branch` that no `origin` branch has is a patch set on the Gerrit server `origin`
+    /// points to: the changes keep the work. False when one is not, or when Gerrit can't be asked.
+    private func isUpForReview(_ branch: String, plan: ReleasePlan) -> Bool {
+        let remote = execute(["-C", plan.repoPath, "remote", "get-url", "origin"])
+        guard remote.status == 0, let server = GerritServer(remote: remote.output) else { return false }
+        let list = execute(["-C", plan.repoPath, "rev-list", "--no-merges", "refs/heads/\(branch)", "--not", "--remotes=origin"])
+        let commits = list.output.split(whereSeparator: \.isNewline).map(String.init)
+        guard list.status == 0, !commits.isEmpty else { return false }
+        var revisions: [String: Set<String>] = [:]
+        return commits.allSatisfy { commit in
+            let trailer = execute(["-C", plan.repoPath, "log", "-1", "--format=%(trailers:key=Change-Id,valueonly)", commit])
+            guard trailer.status == 0,
+                  let changeID = trailer.output.split(whereSeparator: \.isNewline).last.map(String.init)
+            else { return false }
+            if revisions[changeID] == nil {
+                revisions[changeID] = server.revisions(ofChange: changeID, runner: runner)
+            }
+            return revisions[changeID]?.contains(commit) == true
+        }
     }
 
     /// Only a clean "no such ref" (status 1) counts as absent: any other failure goes on to

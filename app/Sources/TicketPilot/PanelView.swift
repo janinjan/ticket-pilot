@@ -246,12 +246,33 @@ struct PanelView: View {
             if let filled = line.filledSteps {
                 StepDots(filled: filled, total: RunLine.stepCount, description: line.progressDescription ?? "")
             }
-            actionRow(line)
+            if model.releasing.contains(line.runID) {
+                removingRow
+            } else {
+                actionRow(line)
+            }
         }
         .padding(10)
         .background(Card.background, in: Card.shape)
+        .opacity(model.releasing.contains(line.runID) ? 0.6 : 1)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(line.isStuck ? "\(line.name), maybe stuck" : line.name)
+    }
+
+    /// In place of the buttons while the worktree, the branches and the run file are deleted (a large
+    /// worktree takes a while).
+    private var removingRow: some View {
+        HStack(spacing: 6) {
+            ProgressView()
+                .controlSize(.small)
+            Text("Removing…")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 2)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Removing")
     }
 
     /// Under the card's text: "Review in <git client>" for a finished run on the left, the session button on
@@ -286,7 +307,7 @@ struct PanelView: View {
         let releasable = model.releasable.contains(line.runID)
         // "Read the report" shows the report: the conversation of a finished run is opened from here.
         let opensConversation = line.section == .reportReady
-        if editor != nil || finderTitle != nil || releasable || opensConversation {
+        if !model.releasing.contains(line.runID), editor != nil || finderTitle != nil || releasable || opensConversation {
             Menu {
                 if opensConversation {
                     Button("Open the session", action: closing { model.openConversation(runID: line.runID) })

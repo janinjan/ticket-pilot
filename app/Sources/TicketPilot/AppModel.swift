@@ -25,6 +25,8 @@ final class AppModel {
     private(set) var diskUsage: [String: Int64] = [:]
     /// Commits of each finished run, ready for review, by run id.
     private(set) var commitCounts: [String: Int] = [:]
+    /// The runs being removed (worktree, branches, run file), by run id: their card reads "Removing…".
+    private(set) var releasing: Set<String> = []
     /// The git client finished runs are reviewed in (`git_client`, else the first known one installed).
     private(set) var gitClient: String?
     /// The editor each run's worktree opens in, by run id; none when no installed app fits.
@@ -531,8 +533,9 @@ final class AppModel {
         runs.first { $0.id == runID }?.testOnly == true
     }
 
+    /// The run's worktree is still on disk: an earlier removal may have deleted it, its run kept.
     func hasWorktree(runID: String) -> Bool {
-        runs.first { $0.id == runID }?.worktree != nil
+        runs.first { $0.id == runID }.map(Releasable.worktreeExists) ?? false
     }
 
     /// Picks the editor of each run with a worktree, from its root folder's entries.
@@ -859,7 +862,8 @@ final class AppModel {
     }
 
     func release(runID: String) {
-        guard releasable.contains(runID), let run = runs.first(where: { $0.id == runID }) else { return }
+        guard releasable.contains(runID), !releasing.contains(runID), let run = runs.first(where: { $0.id == runID })
+        else { return }
         let mainBranch = config?.repos.first { $0.name == run.repo }?.mainBranch
         let releaser = Releaser(runner: untimedRunner)
         let checkedOut = run.worktree.flatMap { releaser.checkedOutBranch(worktree: $0) }
@@ -867,21 +871,42 @@ final class AppModel {
             run: run, runsDirectory: paths.runsDirectory, mainBranch: mainBranch, checkedOutBranch: checkedOut
         )
         guard Alerts.confirmRelease(run, plan: plan) else { return }
+        let freed = Releasable.worktreeExists(run) ? RunLine.sizeLabel(bytes: diskUsage[runID]) : nil
+        let done = (title: "\(run.key) · \(run.repo) removed", body: freed.map { "\($0) freed" })
+        perform(plan, releaser: releaser, forceBranches: false, done: done)
+    }
+
+    /// Releases off the main actor, the card reading "Removing…" meanwhile, then notifies `done`: the panel
+    /// is closed by then. A branch kept for its unmerged commits can be deleted anyway, once the user chose to.
+    private func perform(
+        _ plan: ReleasePlan, releaser: Releaser, forceBranches: Bool, done: (title: String, body: String?)
+    ) {
+        let runID = plan.runID
+        releasing.insert(runID)
         Task { [weak self] in
             let failure = await Task.detached { () -> ReleaseError? in
                 do throws(ReleaseError) {
-                    try releaser.release(plan)
+                    try releaser.release(plan, forceBranches: forceBranches)
                     return nil
                 } catch {
                     return error
                 }
             }.value
-            if let failure {
-                Alerts.show(failure.alertText)
-            } else {
-                self?.reportWindows.close(runID: runID)
+            guard let self else { return }
+            releasing.remove(runID)
+            refreshRuns()
+            guard let failure else {
+                reportWindows.close(runID: runID)
+                notifier?.notifyRemoved(title: done.title, body: done.body)
+                return
             }
-            self?.refreshRuns()
+            guard case .branchNotDeleted = failure else {
+                Alerts.show(failure.alertText)
+                return
+            }
+            if Alerts.confirm(failure.alertText, button: "Delete Anyway", destructive: true) {
+                perform(plan, releaser: releaser, forceBranches: true, done: done)
+            }
         }
     }
 
