@@ -16,6 +16,8 @@ final class JiraPoller {
     private var seen: Set<String>?
     private var schedule = PollSchedule(pollMinutes: 5)
     private var task: Task<Void, Never>?
+    /// The Jira the running loop reads, for `pollNow`; nil once stopped.
+    private var jira: (any JiraSearching)?
 
     init(seenStore: SeenStore, onPoll: @escaping @MainActor (PollOutcome, any JiraSearching) async -> Void) {
         self.seenStore = seenStore
@@ -27,17 +29,32 @@ final class JiraPoller {
     func start(jira: any JiraSearching, pollMinutes: Int) {
         stop()
         schedule = PollSchedule(pollMinutes: pollMinutes)
+        loop(jira)
+    }
+
+    /// Polls at once with the running loop's Jira, then on schedule again; false when no loop runs.
+    @discardableResult
+    func pollNow() -> Bool {
+        guard let jira else { return false }
+        task?.cancel()
+        loop(jira)
+        return true
+    }
+
+    func stop() {
+        task?.cancel()
+        task = nil
+        jira = nil
+    }
+
+    private func loop(_ jira: any JiraSearching) {
+        self.jira = jira
         task = Task { [weak self] in
             while !Task.isCancelled {
                 guard let delay = await self?.poll(jira) else { return }
                 try? await Task.sleep(for: delay)
             }
         }
-    }
-
-    func stop() {
-        task?.cancel()
-        task = nil
     }
 
     private func poll(_ jira: any JiraSearching) async -> Duration {
