@@ -3,6 +3,19 @@ import Testing
 @testable import TicketPilotCore
 
 @Suite(.timeLimit(.minutes(1))) struct PanelFrameTests {
+    @Test func test_theListGrowsWithTheScreen() {
+        #expect(PanelFrame.maxListHeight(visibleScreenHeight: nil) == 400)
+        #expect(PanelFrame.maxListHeight(visibleScreenHeight: 600) == 400)
+        #expect(PanelFrame.maxListHeight(visibleScreenHeight: 900) == 585)
+        #expect(PanelFrame.maxListHeight(visibleScreenHeight: 1400) == 1010)
+    }
+
+    @Test func test_moreBelowOnlyWhenTheContentPassesTheBottom() {
+        #expect(PanelFrame.hasMoreBelow(contentBottom: 700, viewportHeight: 585))
+        #expect(!PanelFrame.hasMoreBelow(contentBottom: 585, viewportHeight: 585))
+        #expect(!PanelFrame.hasMoreBelow(contentBottom: 588, viewportHeight: 585))
+    }
+
     @Test func test_shorterContent_thenShrinksKeepingTheTopEdge() {
         let fitted = PanelFrame.fitted(CGRect(x: 995, y: 452, width: 300, height: 497), contentHeight: 321)
 
