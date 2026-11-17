@@ -207,7 +207,7 @@ A failed command is shown with its error output; after a success, restart your C
 
 The menu bar shows the app's mark (three stacked chevrons) and, next to it, only what is worth a look: the number of runs that need you, else a "✓" when a report is ready and not opened yet, else nothing (a run in progress adds nothing). A small "!" means a setup problem: the panel says which. The number of tickets to do is not shown there; it lives in the panel.
 
-A click on it opens a panel (it scrolls when it gets tall), from top to bottom:
+A click on it opens a panel, from top to bottom. Its list of runs and tickets takes up to most of the screen's height, then scrolls; while some of it is below the bottom, a "More below" button scrolls to the end:
 
 - a header with the app icon and a gear menu: About TicketPilot, Settings… and Send feedback (opens the project's issues page);
 - a footer with Quit (⌘Q), always in sight;

@@ -6,12 +6,23 @@ import TicketPilotCore
 struct PanelView: View {
     let model: AppModel
 
-    /// Beyond this, the runs and tickets scroll.
-    private static let maxListHeight: CGFloat = 400
+    private nonisolated static let listSpace = "panelList"
+    private static let listEnd = "listEnd"
 
     @Environment(\.dismiss) private var dismiss
     @State private var listHeight: CGFloat = 0
+    /// Where the list's content ends, measured in its scroll view: below its bottom, "More below" shows.
+    @State private var contentBottom: CGFloat = 0
     @State private var host = HostWindow()
+
+    /// Beyond this, the runs and tickets scroll: most of the screen the panel is on.
+    private var maxListHeight: CGFloat {
+        PanelFrame.maxListHeight(visibleScreenHeight: (host.window?.screen ?? NSScreen.main)?.visibleFrame.height)
+    }
+
+    private var viewportHeight: CGFloat {
+        min(max(listHeight, 1), maxListHeight)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -24,12 +35,28 @@ struct PanelView: View {
                 Divider()
             }
             if hasList {
-                ScrollView {
-                    list
-                        .padding(12)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            list
+                                .padding(12)
+                            Color.clear
+                                .frame(height: 0)
+                                .id(Self.listEnd)
+                        }
                         .onGeometryChange(for: CGFloat.self, of: \.size.height) { listHeight = $0 }
+                        .onGeometryChange(for: CGFloat.self, of: { $0.frame(in: .named(Self.listSpace)).maxY }) {
+                            contentBottom = $0
+                        }
+                    }
+                    .coordinateSpace(name: Self.listSpace)
+                    .frame(height: viewportHeight)
+                    .overlay(alignment: .bottom) {
+                        if PanelFrame.hasMoreBelow(contentBottom: contentBottom, viewportHeight: viewportHeight) {
+                            moreBelowButton { withAnimation { proxy.scrollTo(Self.listEnd, anchor: .bottom) } }
+                        }
+                    }
                 }
-                .frame(height: min(max(listHeight, 1), Self.maxListHeight))
             } else if let empty = model.emptyListText {
                 Text(empty)
                     .font(.callout)
@@ -53,6 +80,22 @@ struct PanelView: View {
                 model.panelOpened()
             }
         }
+    }
+
+    /// Over the bottom of the list while some of it is out of sight: a ticket under the runs is never missed.
+    private func moreBelowButton(_ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label("More below", systemImage: "chevron.down")
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(.regularMaterial, in: Capsule())
+                .overlay(Capsule().strokeBorder(.separator, lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+        .padding(.bottom, 6)
+        .help("Scroll to the end of the list")
+        .accessibilityLabel("More below, scroll to the end of the list")
     }
 
     private var hasList: Bool {
