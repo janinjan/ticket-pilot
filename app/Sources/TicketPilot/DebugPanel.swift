@@ -63,9 +63,11 @@ enum DebugPanel {
 /// Jira replaced by made-up tickets, under `TICKET_PILOT_DEBUG_FAKE_TICKETS` only.
 struct DebugJira: JiraSearching {
     let count: Int
+    /// Counted for the whole launch: a `DebugJira` is made again each time the setup is checked.
+    let reads: DebugJiraReads
 
     func openAssignedIssues() async throws(JiraError) -> [JiraIssue] {
-        DebugFlags.fakeIssues(count: count)
+        DebugFlags.fakeIssues(count: count, read: await reads.next())
     }
 
     func statusCategories(of keys: [String]) async throws(JiraError) -> [String: JiraIssue.StatusCategory] {
@@ -73,4 +75,14 @@ struct DebugJira: JiraSearching {
     }
 
     func checkCredentials() async throws(JiraError) {}
+}
+
+/// How many times the made-up Jira was read since launch.
+actor DebugJiraReads {
+    private var count = 0
+
+    func next() -> Int {
+        count += 1
+        return count
+    }
 }

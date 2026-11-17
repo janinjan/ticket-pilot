@@ -74,10 +74,15 @@ struct PanelView: View {
         // Top-aligned, should the window be taller for a moment: never a gap under the menu bar.
         .frame(maxHeight: .infinity, alignment: .top)
         .background(HostWindowReader(host: host))
-        // The panel's window becomes key each time the panel opens.
+        // The panel's window becomes key each time the panel opens, and stops being key when it closes.
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
             if let window = host.window, note.object as? NSWindow === window {
                 model.panelOpened()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { note in
+            if let window = host.window, note.object as? NSWindow === window {
+                model.panelClosed()
             }
         }
     }
@@ -99,7 +104,7 @@ struct PanelView: View {
     }
 
     private var hasList: Bool {
-        !model.runGroups.isEmpty || !model.todo.sections.isEmpty
+        model.todo.newSection != nil || !model.runGroups.isEmpty || !model.todo.sections.isEmpty
     }
 
     /// Closes the panel, then acts: an alert, a window or another app comes next. Should `dismiss` leave
@@ -233,26 +238,31 @@ struct PanelView: View {
 
     private var list: some View {
         VStack(alignment: .leading, spacing: 12) {
+            if let new = model.todo.newSection {
+                ticketSection(new)
+            }
             ForEach(model.runGroups, id: \.section) { group in
                 VStack(alignment: .leading, spacing: 6) {
                     SectionTitle(group.section.title)
                     ForEach(group.lines, id: \.runID, content: runCard)
                 }
             }
-            ForEach(model.todo.sections, id: \.title) { section in
-                VStack(alignment: .leading, spacing: 6) {
-                    SectionTitle(section.title)
-                    VStack(spacing: 0) {
-                        ForEach(Array(section.issues.enumerated()), id: \.element.id) { index, issue in
-                            if index > 0 { Divider().padding(.leading, 10) }
-                            ticketRow(issue)
-                        }
-                    }
-                    .background(Card.background, in: Card.shape)
-                }
-            }
+            ForEach(model.todo.sections, id: \.title, content: ticketSection)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func ticketSection(_ section: TodoSection) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            SectionTitle(section.title)
+            VStack(spacing: 0) {
+                ForEach(Array(section.issues.enumerated()), id: \.element.id) { index, issue in
+                    if index > 0 { Divider().padding(.leading, 10) }
+                    ticketRow(issue)
+                }
+            }
+            .background(Card.background, in: Card.shape)
+        }
     }
 
     private func runCard(_ line: RunLine) -> some View {

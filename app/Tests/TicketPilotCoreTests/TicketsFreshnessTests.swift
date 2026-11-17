@@ -29,4 +29,11 @@ import Testing
         #expect(text(secondsAgo: 60 * 60) == "Tickets updated 1 h ago")
         #expect(text(secondsAgo: 3 * 60 * 60 + 10) == "Tickets updated 3 h ago")
     }
+
+    @Test func test_opensThePanelWithAFreshReadAfterAMinute() {
+        #expect(TicketsFreshness.needsRead(lastUpdate: nil, now: now))
+        #expect(TicketsFreshness.needsRead(lastUpdate: now.addingTimeInterval(-61), now: now))
+        #expect(!TicketsFreshness.needsRead(lastUpdate: now.addingTimeInterval(-59), now: now))
+        #expect(!TicketsFreshness.needsRead(lastUpdate: now, now: now))
+    }
 }

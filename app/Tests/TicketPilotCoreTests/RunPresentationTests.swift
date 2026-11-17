@@ -261,6 +261,21 @@ import Testing
         #expect(MenuBarIcon(badge: nil, showsProblem: true).accessibilityValue == "Setup needed")
     }
 
+    @Test func test_menuBarIconAddsADotForNewTickets() {
+        #expect(MenuBarIcon.make(iconState: .idle, hasSetupProblem: false).hasNewTickets == false)
+        #expect(
+            MenuBarIcon.make(iconState: .waiting(count: 2), hasSetupProblem: true, hasNewTickets: true)
+                == MenuBarIcon(badge: "2", showsProblem: true, hasNewTickets: true)
+        )
+        #expect(MenuBarIcon.make(iconState: .reportReady, hasSetupProblem: false, hasNewTickets: true).badge == "✓")
+        #expect(MenuBarIcon(badge: nil, showsProblem: false, hasNewTickets: true).accessibilityValue == "New tickets")
+        #expect(MenuBarIcon(badge: "2", showsProblem: false, hasNewTickets: true).accessibilityValue == "2 need you, new tickets")
+        #expect(
+            MenuBarIcon(badge: "✓", showsProblem: true, hasNewTickets: true).accessibilityValue
+                == "Report ready, new tickets, setup needed"
+        )
+    }
+
     @Test func test_keepsMacAwakeOnlyForRunningRunsThatAreNotStuck() {
         let fresh = Self.run(id: "r", stepName: "verify", startedMinutesAgo: 12)
         let interrupted = Self.run(id: "s", stepName: "verify", startedMinutesAgo: 61)

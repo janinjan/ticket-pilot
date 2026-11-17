@@ -129,4 +129,51 @@ private func issue(_ key: String, status: String, category: JiraIssue.StatusCate
         let runs = [run("ABC-1", .running), run("ABC-2", .waiting), run("ABC-3", .done), run("ABC-4", .unknown)]
         #expect(TodoList.keysWithRuns(runs) == ["ABC-1", "ABC-2", "ABC-3", "ABC-4"])
     }
+    @Test func test_aNewTicketIsListedApartFromItsSection() {
+        let list = TodoList(
+            issues: [
+                issue("ABC-1", status: "To Start", category: .toDo),
+                issue("ABC-2", status: "To Start", category: .toDo),
+                issue("ABC-3", status: "In Progress", category: .inProgress),
+            ],
+            readyStatuses: ["To Start"],
+            newKeys: ["ABC-2", "ABC-3"]
+        )
+        #expect(list.new.map(\.key) == ["ABC-2", "ABC-3"])
+        #expect((list.ready + list.backlog).map(\.key) == ["ABC-1"])
+        #expect(list.inProgress.isEmpty)
+        #expect(list.count == 3)
+        #expect(list.sections.map(\.title) == ["To do"])
+        #expect(list.newSection == TodoSection(title: "New", issues: list.new))
+        #expect(TodoList(issues: [], readyStatuses: []).newSection == nil)
+    }
+
+    @Test func test_aNewTicketWithARunOrFinishedIsNotListed() {
+        let list = TodoList(
+            issues: [
+                issue("ABC-1", status: "To Start", category: .toDo),
+                issue("ABC-2", status: "To Deliver", category: .inProgress),
+                issue("ABC-3", status: "To Start", category: .toDo),
+            ],
+            readyStatuses: ["To Start"],
+            finishedStatuses: ["To Deliver"],
+            keysWithRuns: ["ABC-1"],
+            newKeys: ["ABC-1", "ABC-2"]
+        )
+        #expect(list.new.isEmpty)
+        #expect(list.listedKeys == ["ABC-3"])
+    }
+
+    @Test func test_theListedKeysAreTheTicketsShown() {
+        let list = TodoList(
+            issues: [
+                issue("ABC-1", status: "To Start", category: .toDo),
+                issue("ABC-2", status: "In Progress", category: .inProgress),
+                issue("ABC-3", status: "Done", category: .done),
+            ],
+            readyStatuses: ["To Start"],
+            newKeys: ["ABC-1"]
+        )
+        #expect(list.listedKeys == ["ABC-1", "ABC-2"])
+    }
 }

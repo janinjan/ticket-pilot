@@ -13,4 +13,10 @@ public enum TicketsFreshness {
         default: return "Tickets updated \(minutes / 60) h ago"
         }
     }
+
+    /// Opening the panel reads Jira again when the last read is more than a minute old, or never happened.
+    public static func needsRead(lastUpdate: Date?, now: Date) -> Bool {
+        guard let lastUpdate else { return true }
+        return now.timeIntervalSince(lastUpdate) > 60
+    }
 }

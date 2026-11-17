@@ -8,6 +8,8 @@ import TicketPilotCore
 @MainActor @Observable
 final class AppModel {
     private(set) var todo = TodoList(issues: [], readyStatuses: [])
+    /// The newly assigned tickets not shown in the panel yet, listed under "New" above the runs.
+    private(set) var newTickets = NewTickets()
     private(set) var runGroups: [RunGroup] = []
     private(set) var iconState: RunIconState = .idle
     /// Also true while there is no valid config or no token: Jira is not read at all.
@@ -79,7 +81,7 @@ final class AppModel {
     let hasBundle = Bundle.main.bundleIdentifier != nil
 
     var icon: MenuBarIcon {
-        MenuBarIcon.make(iconState: iconState, hasSetupProblem: setupProblem != nil)
+        MenuBarIcon.make(iconState: iconState, hasSetupProblem: setupProblem != nil, hasNewTickets: newTickets.hasUnshown)
     }
 
     /// The problem the panel offers to fix, if any.
@@ -180,6 +182,18 @@ final class AppModel {
         SeenStore(file: paths.appDirectory.appendingPathComponent("acknowledged.json"))
     }
 
+    /// Where the tickets seen and the new tickets are kept: with made-up tickets, in a folder of this launch
+    /// only, so that a debug run never changes the real ones.
+    @ObservationIgnored private let ticketStateDirectory: URL = DebugFlags.current.fakeTicketCount == nil
+        ? StatePaths().appDirectory
+        : FileManager.default.temporaryDirectory.appendingPathComponent("ticket-pilot-debug-\(UUID().uuidString)")
+    /// The reads of the made-up Jira since launch: from the second one, it assigns a new ticket.
+    @ObservationIgnored private let debugJiraReads = DebugJiraReads()
+
+    private var newTicketsStore: SeenStore {
+        SeenStore(file: ticketStateDirectory.appendingPathComponent("new-tickets.json"))
+    }
+
     // MARK: - Start
 
     func start() {
@@ -190,7 +204,8 @@ final class AppModel {
             LoginItem.registerOnce(marker: paths.appDirectory.appendingPathComponent("login-item-registered"))
             openAtLoginState = LoginItem.isEnabled
         }
-        poller = JiraPoller(seenStore: SeenStore(file: paths.appDirectory.appendingPathComponent("seen.json"))) {
+        newTickets = NewTickets.load(from: newTicketsStore)
+        poller = JiraPoller(seenStore: SeenStore(file: ticketStateDirectory.appendingPathComponent("seen.json"))) {
             [weak self] outcome, jira in await self?.apply(outcome, from: jira)
         }
         acknowledged = acknowledgedStore.load() ?? []
@@ -236,12 +251,13 @@ final class AppModel {
             return
         }
         let auth = atlassianAuth
+        let debugJiraReads = debugJiraReads
         doctorTask = Task { [weak self] in
             let token: Result<String, KeychainError>
             let jira: (any JiraSearching)?
             if let count = DebugFlags.current.fakeTicketCount {
                 token = .success("debug")
-                jira = DebugJira(count: count)
+                jira = DebugJira(count: count, reads: debugJiraReads)
             } else {
                 token = await Self.atlassianSignIn(auth)
                 jira = (try? token.get()).map { _ in
@@ -395,11 +411,15 @@ final class AppModel {
     /// Reads the assigned tickets again now; without a Jira to read (no sign-in, no config), checks the setup
     /// again, which polls once it can.
     func refreshTickets() {
-        guard poller?.pollNow() == true else {
-            runDoctor()
-            return
-        }
+        if !pollTicketsNow() { runDoctor() }
+    }
+
+    /// Reads Jira now, the refresh button spinning until it answered; false when Jira is not read at all.
+    @discardableResult
+    private func pollTicketsNow() -> Bool {
+        guard poller?.pollNow() == true else { return false }
         refreshingTickets = true
+        return true
     }
 
     private func apply(_ outcome: PollOutcome, from jira: any JiraSearching) async {
@@ -407,16 +427,17 @@ final class AppModel {
         switch outcome {
         case .failed:
             jiraFailing = true
-        case let .succeeded(issues, newTickets):
+        case let .succeeded(issues, notified):
             jiraFailing = false
             jiraAnswered = true
             clock = Date()
             ticketsUpdatedAt = clock
             self.issues = issues
             summaries = Dictionary(issues.map { ($0.key, $0.summary) }, uniquingKeysWith: { first, _ in first })
+            updateNewTickets { $0.add(notified.map(\.key)) }
             updatePresentation()
             rebuildTodo()
-            newTickets.forEach { notifier?.notifyNewTicket($0) }
+            notified.forEach { notifier?.notifyNewTicket($0) }
             await refreshReleasable(jira)
         }
     }
@@ -441,12 +462,33 @@ final class AppModel {
         }
     }
 
-    /// The tickets in progress and to do, without those that have a run.
+    /// The tickets new, in progress and to do, without those that have a run. A new ticket the list no longer
+    /// shows stops being new, once Jira answered: before, the tickets listed are not known yet.
     private func rebuildTodo() {
-        todo = TodoList(
+        todo = makeTodo()
+        updateNewTickets { $0.keepOnly(jiraAnswered ? todo.listedKeys : nil) }
+    }
+
+    private func makeTodo() -> TodoList {
+        TodoList(
             issues: issues, readyStatuses: config?.readyStatuses ?? [], finishedStatuses: config?.finishedStatuses ?? [],
-            keysWithRuns: TodoList.keysWithRuns(runs)
+            keysWithRuns: TodoList.keysWithRuns(runs), newKeys: newTickets.keys
         )
+    }
+
+    /// Changes the new tickets, and only when they did change, notifies the icon; when the tickets themselves
+    /// changed (a close of the panel, a poll), saves the file and lists them again, so that a ticket shown
+    /// before a close is no longer under "New" at the next opening. The list is rebuilt at each poll and each
+    /// run file change, so most calls change nothing.
+    private func updateNewTickets(_ change: (inout NewTickets) -> Void) {
+        var updated = newTickets
+        change(&updated)
+        guard updated != newTickets else { return }
+        let keysChanged = updated.keys != newTickets.keys
+        newTickets = updated
+        guard keysChanged else { return }
+        try? newTickets.save(to: newTicketsStore)
+        todo = makeTodo()
     }
 
     /// Posts a needs-you notification as `NotificationPolicy` says: at once, or (a plain end of turn) two
@@ -616,12 +658,22 @@ final class AppModel {
         }
     }
 
-    /// The panel opened: counts again the runs whose `origin/<main>` moved since their last count.
+    /// The panel opened: the new tickets are on screen, the tickets are read again when the list is old, and
+    /// the runs whose `origin/<main>` moved since their last count are counted again.
     func panelOpened() {
+        updateNewTickets { $0.panelOpened() }
+        if TicketsFreshness.needsRead(lastUpdate: ticketsUpdatedAt, now: Date()) {
+            pollTicketsNow()
+        }
         countCommits()
         // The config is not watched: while it can't be used, each opening reads it again, so the banner moves
         // on once the user saved it.
         if configProblem != nil { runDoctor() }
+    }
+
+    /// The panel closed, or the app quits: the new tickets it showed are no longer new.
+    func panelClosed() {
+        updateNewTickets { $0.panelClosed() }
     }
 
     /// Measures the worktree of each finished run off the main actor, again only when its run file changed.
