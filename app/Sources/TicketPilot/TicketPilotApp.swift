@@ -32,6 +32,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Quitting with the panel open closes it: the new tickets it showed stay seen after a relaunch.
+    func applicationWillTerminate(_ notification: Notification) {
+        model.panelClosed()
+    }
+
     /// Keeps the status button's tooltip and VoiceOver value in step with the icon.
     private func trackStatusButton() {
         let icon = withObservationTracking {

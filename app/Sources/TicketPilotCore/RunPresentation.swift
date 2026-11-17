@@ -225,13 +225,16 @@ public struct MenuBarIcon: Equatable, Sendable {
     public var badge: String?
     /// A small "!": the panel offers a setup problem to fix.
     public var showsProblem: Bool
+    /// A dot: a newly assigned ticket waits under "New", not shown in the panel yet.
+    public var hasNewTickets: Bool
 
-    public init(badge: String?, showsProblem: Bool) {
+    public init(badge: String?, showsProblem: Bool, hasNewTickets: Bool = false) {
         self.badge = badge
         self.showsProblem = showsProblem
+        self.hasNewTickets = hasNewTickets
     }
 
-    /// What VoiceOver says after "TicketPilot": the badge in words, and the setup problem.
+    /// What VoiceOver says after "TicketPilot": the badge in words, the new tickets, and the setup problem.
     public var accessibilityValue: String {
         let badgeText: String? = switch badge {
         case nil: nil
@@ -239,18 +242,18 @@ public struct MenuBarIcon: Equatable, Sendable {
         case "1": "1 needs you"
         case let count?: "\(count) need you"
         }
-        let parts = [badgeText, showsProblem ? "setup needed" : nil].compactMap { $0 }
+        let parts = [badgeText, hasNewTickets ? "new tickets" : nil, showsProblem ? "setup needed" : nil].compactMap { $0 }
         let text = parts.joined(separator: ", ")
         return text.prefix(1).uppercased() + text.dropFirst()
     }
 
-    public static func make(iconState: RunIconState, hasSetupProblem: Bool) -> MenuBarIcon {
+    public static func make(iconState: RunIconState, hasSetupProblem: Bool, hasNewTickets: Bool = false) -> MenuBarIcon {
         let badge: String? = switch iconState {
         case .idle, .running: nil
         case let .waiting(count): String(count)
         case .reportReady: "✓"
         }
-        return MenuBarIcon(badge: badge, showsProblem: hasSetupProblem)
+        return MenuBarIcon(badge: badge, showsProblem: hasSetupProblem, hasNewTickets: hasNewTickets)
     }
 }
 

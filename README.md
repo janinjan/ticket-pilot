@@ -205,7 +205,7 @@ A failed command is shown with its error output; after a success, restart your C
 
 ### The panel
 
-The menu bar shows the app's mark (three stacked chevrons) and, next to it, only what is worth a look: the number of runs that need you, else a "✓" when a report is ready and not opened yet, else nothing (a run in progress adds nothing). A small "!" means a setup problem: the panel says which. The number of tickets to do is not shown there; it lives in the panel.
+The menu bar shows the app's mark (three stacked chevrons) and, next to it, only what is worth a look: the number of runs that need you, else a "✓" when a report is ready and not opened yet, else nothing (a run in progress adds nothing). A small "!" means a setup problem: the panel says which. A dot means a ticket newly assigned to you waits under "New" in the panel. The number of tickets to do is not shown there; it lives in the panel.
 
 A click on it opens a panel, from top to bottom. Its list of runs and tickets takes up to most of the screen's height, then scrolls; while some of it is below the bottom, a "More below" button scrolls to the end:
 
@@ -224,6 +224,7 @@ A click on it opens a panel, from top to bottom. Its list of runs and tickets ta
   - last, "Update the Claude Code plugin (<installed> → <carried>)…", since an older plugin still runs.
 
   The MCP servers and the disk space are only warnings and never show there;
+- **New**: above the runs, the tickets newly assigned to you that the panel has not shown yet (a ticket's first assignment only; none at the first Jira read after install), until the panel closes after showing them, or the app quits with it open; opening the panel reads Jira again when the list is more than a minute old;
 - **Waiting for you**: a card per run waiting for you: the ticket's title, a small line "KEY · iOS · <Jira status>" (the ticket's status in Jira, left out while unknown; never the run's own state, which is in the line below), then "Waiting for your answer: <question>" or "Waiting for your go." / "Waiting for your input.";
 - **TicketPilot is working on**: a card per run at work, with its step and its duration ("Step 6 of 10 · Verifying (build, tests) · 12 min"), ten dots for the ten steps (filled up to the current one; each dot's tooltip names its step; a run waiting for you shows them too), and a "Maybe stuck" tag when a step runs much longer than usual;
 - **Ready for you**: a card per finished run, "3 commits ready for review" (the commits checked out in its worktree that `origin/<main_branch>` does not have yet, compared by content, so a commit merged under another hash, as Gerrit does, is no longer counted; counted again each time the panel opens if `origin/<main_branch>` moved, after a fetch of yours: the app never fetches; "Ready for review" while unknown; "Report ready · no code change" for a run stopped before its worktree, a ticket already done for example, and "Test report ready · no code change", with no "Review in", for a run that only tested in the app), with no time (it no longer matters), "Review in <git client>" (opens the worktree in `git_client`, else the first installed of GitHub Desktop, Fork, Tower, Sourcetree and GitKraken; GitHub Desktop adds the repo if needed) with "Remove worktree…" in its "⋯" menu, also for a run whose ticket is done in Jira;

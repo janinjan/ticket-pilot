@@ -38,4 +38,12 @@ import Testing
         #expect(issues.map(\.key) == ["FAKE-1", "FAKE-2", "FAKE-3"])
         #expect(issues.map(\.statusName) == ["To Start", "Backlog", "To Start"])
     }
+
+    @Test func test_fakeIssues_thenANewTicketFromTheSecondRead() {
+        #expect(DebugFlags.fakeIssues(count: 2, read: 1).map(\.key) == ["FAKE-1", "FAKE-2"])
+        let second = DebugFlags.fakeIssues(count: 2, read: 2)
+        #expect(second.map(\.key) == ["FAKE-1", "FAKE-2", "FAKE-NEW"])
+        #expect(second.last?.statusName == "To Start")
+        #expect(DebugFlags.fakeIssues(count: 2, read: 5) == second)
+    }
 }

@@ -1,20 +1,35 @@
 /// Open tickets assigned to the user: in progress (a run released before the ticket is done), then still
 /// to do, those in a "ready" status first. A ticket with a run is left out: its run card stands for it.
+/// The new tickets (`NewTickets`) are listed apart, under "New" above the runs, and in no other section.
 public struct TodoList: Equatable, Sendable {
+    public var new: [JiraIssue]
     public var inProgress: [JiraIssue]
     public var ready: [JiraIssue]
     public var backlog: [JiraIssue]
+    /// The keys of every ticket listed, new ones included: a new ticket outside it is no longer new.
+    public var listedKeys: Set<String>
 
     /// Every ticket listed.
-    public var count: Int { inProgress.count + ready.count + backlog.count }
+    public var count: Int { new.count + inProgress.count + ready.count + backlog.count }
 
     public init(
-        issues: [JiraIssue], readyStatuses: [String], finishedStatuses: [String] = [], keysWithRuns: Set<String> = []
+        issues: [JiraIssue], readyStatuses: [String], finishedStatuses: [String] = [], keysWithRuns: Set<String> = [],
+        newKeys: Set<String> = []
     ) {
         let readyNames = Set(readyStatuses.map { $0.lowercased() })
         let finishedNames = Set(finishedStatuses.map { $0.lowercased() })
-        let open = issues.filter { !keysWithRuns.contains($0.key) }
-        inProgress = open.filter { $0.statusCategory == .inProgress && !finishedNames.contains($0.statusName.lowercased()) }
+        let listed = issues.filter { issue in
+            guard !keysWithRuns.contains(issue.key) else { return false }
+            switch issue.statusCategory {
+            case .toDo: return true
+            case .inProgress: return !finishedNames.contains(issue.statusName.lowercased())
+            case .done: return false
+            }
+        }
+        listedKeys = Set(listed.map(\.key))
+        new = listed.filter { newKeys.contains($0.key) }
+        let open = listed.filter { !newKeys.contains($0.key) }
+        inProgress = open.filter { $0.statusCategory == .inProgress }
         let todo = open.filter { $0.statusCategory == .toDo }
         ready = todo.filter { readyNames.contains($0.statusName.lowercased()) }
         backlog = todo.filter { !readyNames.contains($0.statusName.lowercased()) }
@@ -34,8 +49,13 @@ public struct TodoList: Equatable, Sendable {
         Set(runs.map(\.key))
     }
 
-    /// The panel sections: "In progress" when some are, then "Ready to start" and "Backlog" when both have
-    /// tickets, else one "To do".
+    /// The "New" section, shown above the runs; nil without a new ticket.
+    public var newSection: TodoSection? {
+        new.isEmpty ? nil : TodoSection(title: "New", issues: new)
+    }
+
+    /// The panel sections under the runs: "In progress" when some are, then "Ready to start" and "Backlog"
+    /// when both have tickets, else one "To do".
     public var sections: [TodoSection] {
         let ongoing = inProgress.isEmpty ? [] : [TodoSection(title: "In progress", issues: inProgress)]
         if !ready.isEmpty, !backlog.isEmpty {

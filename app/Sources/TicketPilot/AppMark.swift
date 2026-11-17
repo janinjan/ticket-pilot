@@ -27,6 +27,10 @@ private struct MenuBarGlyph: View {
     var body: some View {
         HStack(spacing: 2) {
             ChevronsMark(color: .black, height: 16)
+            if icon.hasNewTickets {
+                Circle()
+                    .frame(width: 5, height: 5)
+            }
             if let badge = icon.badge {
                 Text(badge)
                     .font(.system(size: 13, weight: .medium))
