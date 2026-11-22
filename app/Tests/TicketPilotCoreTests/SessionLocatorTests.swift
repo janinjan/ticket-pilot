@@ -169,7 +169,7 @@ import Testing
 
     @Test func openTabEscapesFolderAndCommand() throws {
         let runner = Runner(ProcessResult(status: 0, output: "", error: ""))
-        try GhosttyController(runner: runner).openTab(directory: #"/w "x""#, command: #"echo "hi" \"#)
+        try GhosttyController(runner: runner).openTab(directory: #"/w "x""#, command: #"echo "hi" \"#, title: "ABC-1")
         let script = runner.calls[0].1.joined(separator: " ")
         #expect(script.contains(#"initial working directory:"/w \"x\"""#))
         #expect(script.contains(#""echo \"hi\" \\" & linefeed"#))
@@ -181,7 +181,7 @@ import Testing
         let controller = GhosttyController(runner: runner)
         _ = try controller.listTerminals()
         try controller.focus(terminalID: "1")
-        try controller.openTab(directory: "/w", command: "claude --resume s1")
+        try controller.openTab(directory: "/w", command: "claude --resume s1", title: "ABC-1")
         #expect(runner.calls.count == 3)
         for call in runner.calls {
             let script = call.1.joined(separator: " ").lowercased()
@@ -240,18 +240,31 @@ import Testing
 
     @Test func aMatchingTabIsFocusedWhateverTheSessionState() {
         for action in [SessionAction.bringToFront, .resume] {
-            #expect(action.ghosttyOutcome(terminals: Self.tabs, key: "ABC-1", folders: ["/r"]) == .focus(terminalID: "b"))
+            #expect(action.scriptableOutcome(terminals: Self.tabs, key: "ABC-1", folders: ["/r"]) == .focus(terminalID: "b"))
         }
     }
 
     @Test func aRunningSessionWithNoTabIsResumedInANewTab() {
-        #expect(SessionAction.bringToFront.ghosttyOutcome(terminals: Self.tabs, key: "ABC-2", folders: ["/r"]) == .openNewTab)
-        #expect(SessionAction.bringToFront.ghosttyOutcome(terminals: [], key: "ABC-2", folders: ["/r"]) == .openNewTab)
-        #expect(SessionAction.resume.ghosttyOutcome(terminals: Self.tabs, key: "ABC-2", folders: ["/r"]) == .openNewTab)
+        #expect(SessionAction.bringToFront.scriptableOutcome(terminals: Self.tabs, key: "ABC-2", folders: ["/r"]) == .openNewTab)
+        #expect(SessionAction.bringToFront.scriptableOutcome(terminals: [], key: "ABC-2", folders: ["/r"]) == .openNewTab)
+        #expect(SessionAction.resume.scriptableOutcome(terminals: Self.tabs, key: "ABC-2", folders: ["/r"]) == .openNewTab)
+    }
+
+    @Test func anOrcaTabNamedAfterTheTicketIsFocusedEvenUntitledLikeClaude() {
+        // Orca shows the title Claude Code sets ("ABC-7 ticket pilot"): the key is what names it.
+        let tabs = [TerminalSurface(id: "o", name: "ABC-7 ticket pilot", workingDirectory: "/r")]
+        for action in [SessionAction.start, .resume, .bringToFront] {
+            #expect(action.scriptableOutcome(
+                terminals: tabs, key: "ABC-7", folders: [], keyNamesTheSession: true
+            ) == .focus(terminalID: "o"))
+        }
+        #expect(SessionAction.resume.scriptableOutcome(
+            terminals: tabs, key: "ABC-7", folders: []
+        ) == .openNewTab)
     }
 
     @Test func aLiveSessionIsNeverDuplicatedWhenTheTabListCannotBeRead() {
-        #expect(SessionAction.bringToFront.ghosttyOutcome(terminals: nil, key: "ABC-1", folders: []) == .bringGhosttyToFront)
-        #expect(SessionAction.resume.ghosttyOutcome(terminals: nil, key: "ABC-1", folders: []) == .openNewTab)
+        #expect(SessionAction.bringToFront.scriptableOutcome(terminals: nil, key: "ABC-1", folders: []) == .bringToFront)
+        #expect(SessionAction.resume.scriptableOutcome(terminals: nil, key: "ABC-1", folders: []) == .openNewTab)
     }
 }
