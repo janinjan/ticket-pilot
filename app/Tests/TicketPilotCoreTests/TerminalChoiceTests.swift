@@ -142,6 +142,47 @@ import Testing
         #expect(detector.installedTerminals() == ["Warp"])
     }
 
+    @Test func test_orcaIsOfferedWhenInstalled() {
+        #expect(TerminalChoice.options(installed: ["Orca"], configured: nil) == ["Orca", "Terminal"])
+    }
+
+    @Test func test_orcaAndGhosttyAreScriptable() {
+        #expect(TerminalChoice(appName: "orca").isOrca)
+        #expect(!TerminalChoice(appName: "Ghostty").isOrca)
+        #expect(TerminalChoice(appName: "Orca").isScriptable)
+        #expect(TerminalChoice(appName: "Ghostty").isScriptable)
+        #expect(!TerminalChoice(appName: "iTerm").isScriptable)
+    }
+
+    @Test func test_claudeHostedInOrcaIsDetected() {
+        let table = """
+          100 1 /Applications/Orca.app/Contents/MacOS/Orca
+          200 100 /Applications/Orca.app/Contents/Frameworks/Orca Helper.app/Contents/MacOS/Orca Helper
+          300 200 /bin/zsh
+          400 300 claude
+        """
+        #expect(TerminalDetector.host(inProcessTable: table) == "Orca")
+    }
+
+    @Test func test_claudeInAnOrcaTerminalTabIsDetected() {
+        // The real chain: Orca's terminal host runs login, then the shell, then claude.
+        let table = """
+          84446 1 /Users/me/Library/Application Support/orca/daemon-host/macos/terminal-host-1/app.noindex/Orca Agents.app/Contents/MacOS/Orca Agents
+          61222 84446 /usr/bin/login
+          61300 61222 -zsh
+          61400 61300 claude
+        """
+        #expect(TerminalDetector.host(inProcessTable: table) == "Orca")
+    }
+
+    @Test func test_orcaFindsSessionsByKeyOnly() {
+        // Every Orca tab of a repo reports the repo's main checkout: a folder says nothing about the ticket.
+        #expect(TerminalChoice(appName: "Orca").sessionFolders(["/w", "/r"]).isEmpty)
+        #expect(TerminalChoice(appName: "Ghostty").sessionFolders(["/w", "/r"]) == ["/w", "/r"])
+        #expect(TerminalChoice(appName: "Orca").keyNamesTheSession)
+        #expect(!TerminalChoice(appName: "Ghostty").keyNamesTheSession)
+    }
+
     @Test func test_pickerOffersTheInstalledKnownTerminalsThenTerminal() {
         #expect(TerminalChoice.options(installed: [], configured: nil) == ["Terminal"])
         #expect(TerminalChoice.options(installed: ["warp", "Ghostty"], configured: nil) == ["Ghostty", "Warp", "Terminal"])
