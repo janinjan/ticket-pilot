@@ -49,7 +49,7 @@ private func issue(_ key: String, status: String, category: JiraIssue.StatusCate
         func titles(_ issues: [JiraIssue]) -> [String] {
             TodoList(issues: issues, readyStatuses: ["To Start"]).sections.map(\.title)
         }
-        #expect(titles([ready, ongoing]) == ["In progress", "To do"])
+        #expect(titles([ready, ongoing]) == ["In progress", "Ready to start"])
         #expect(titles([backlog, ready, ongoing]) == ["In progress", "Ready to start", "Backlog"])
         #expect(titles([ongoing]) == ["In progress"])
     }
@@ -69,15 +69,16 @@ private func issue(_ key: String, status: String, category: JiraIssue.StatusCate
         #expect(list.backlog.map(\.key) == ["ABC-1", "ABC-3"])
     }
 
-    @Test func test_sectionsAreOneToDoListUnlessBothKindsExist() {
+    /// A ticket in the backlog is always under "Backlog", even with no ticket ready to start.
+    @Test func test_readyAndBacklogAreAlwaysTheirOwnSections() {
         let ready = issue("ABC-1", status: "To Start", category: .toDo)
         let backlog = issue("ABC-2", status: "Backlog", category: .toDo)
         func titles(_ issues: [JiraIssue]) -> [String] {
             TodoList(issues: issues, readyStatuses: ["To Start"]).sections.map(\.title)
         }
         #expect(titles([ready, backlog]) == ["Ready to start", "Backlog"])
-        #expect(titles([ready]) == ["To do"])
-        #expect(titles([backlog]) == ["To do"])
+        #expect(titles([ready]) == ["Ready to start"])
+        #expect(titles([backlog]) == ["Backlog"])
         #expect(titles([]) == [])
         let both = TodoList(issues: [backlog, ready], readyStatuses: ["To Start"]).sections
         #expect(both.map { $0.issues.map(\.key) } == [["ABC-1"], ["ABC-2"]])
@@ -143,7 +144,7 @@ private func issue(_ key: String, status: String, category: JiraIssue.StatusCate
         #expect((list.ready + list.backlog).map(\.key) == ["ABC-1"])
         #expect(list.inProgress.isEmpty)
         #expect(list.count == 3)
-        #expect(list.sections.map(\.title) == ["To do"])
+        #expect(list.sections.map(\.title) == ["Ready to start"])
         #expect(list.newSection == TodoSection(title: "New", issues: list.new))
         #expect(TodoList(issues: [], readyStatuses: []).newSection == nil)
     }

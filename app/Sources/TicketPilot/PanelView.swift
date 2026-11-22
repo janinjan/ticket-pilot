@@ -173,16 +173,18 @@ struct PanelView: View {
         .accessibilityLabel(busy ? "Refreshing the tickets" : "Refresh the tickets")
     }
 
-    /// The refresh button and when the tickets were last read; Quit, always in sight, as in the other menu
-    /// bar apps.
+    /// The refresh button and when the tickets were last read, once Jira can be read; Quit, always in sight,
+    /// as in the other menu bar apps.
     private var footer: some View {
         HStack(spacing: 2) {
-            refreshButton
-            if let freshness = model.ticketsFreshness {
-                Text(freshness)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+            if model.readsJira {
+                refreshButton
+                if let freshness = model.ticketsFreshness {
+                    Text(freshness)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
             Spacer()
             Button("Quit") { NSApplication.shared.terminate(nil) }
