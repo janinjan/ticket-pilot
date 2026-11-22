@@ -19,7 +19,10 @@ final class AuxiliaryWindow {
             window.center()
             self.window = window
         }
-        NSApp.activate()
+        // The menu bar panel never makes TicketPilot the active app, so `activate()` (macOS 14+) only asks
+        // and the active app keeps the front, as does `orderFrontRegardless()`: only the deprecated
+        // `activate(ignoringOtherApps:)` still brings the window in front of another app's.
+        NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
     }
 }
