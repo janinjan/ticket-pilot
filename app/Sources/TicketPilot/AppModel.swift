@@ -99,6 +99,12 @@ final class AppModel {
     /// Whether this launch (or the last sign-in) already tried to write the config from a stored sign-in.
     @ObservationIgnored private var jiraSetupTried = false
 
+    /// Jira can be read: an Atlassian sign-in and a config that loads. Until then, the panel offers no
+    /// refresh of the tickets: its setup banner says what to do.
+    var readsJira: Bool {
+        hasAtlassianSignIn && configProblem != .missing && !configIsBroken
+    }
+
     /// A config that exists but does not load: what depends on it in Settings waits for the fix.
     var configIsBroken: Bool {
         if case .invalid = configProblem { true } else { false }

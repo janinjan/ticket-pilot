@@ -54,15 +54,14 @@ public struct TodoList: Equatable, Sendable {
         new.isEmpty ? nil : TodoSection(title: "New", issues: new)
     }
 
-    /// The panel sections under the runs: "In progress" when some are, then "Ready to start" and "Backlog"
-    /// when both have tickets, else one "To do".
+    /// The panel sections under the runs, each shown when it has tickets: "In progress", "Ready to start",
+    /// then "Backlog".
     public var sections: [TodoSection] {
-        let ongoing = inProgress.isEmpty ? [] : [TodoSection(title: "In progress", issues: inProgress)]
-        if !ready.isEmpty, !backlog.isEmpty {
-            return ongoing + [TodoSection(title: "Ready to start", issues: ready), TodoSection(title: "Backlog", issues: backlog)]
-        }
-        let all = ready + backlog
-        return ongoing + (all.isEmpty ? [] : [TodoSection(title: "To do", issues: all)])
+        [
+            TodoSection(title: "In progress", issues: inProgress),
+            TodoSection(title: "Ready to start", issues: ready),
+            TodoSection(title: "Backlog", issues: backlog),
+        ].filter { !$0.issues.isEmpty }
     }
 }
 
