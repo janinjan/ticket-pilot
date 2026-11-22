@@ -61,6 +61,8 @@ final class AppModel {
         TicketsFreshness.text(lastUpdate: ticketsUpdatedAt, refreshing: refreshingTickets, now: clock)
     }
     private(set) var runs: [Run] = []
+    /// Tickets whose Start was clicked and whose run has not appeared yet.
+    private(set) var startingTickets = StartingTickets()
     private(set) var acknowledged: Set<String> = []
     /// The Jira summary of each assigned ticket, by key: the title of a run that has none of its own.
     private(set) var summaries: [String: String] = [:]
@@ -561,6 +563,7 @@ final class AppModel {
     private func updatePresentation() {
         iconState = RunIconState.make(runs: runs, acknowledgedDone: acknowledged)
         let now = Date()
+        startingTickets.settle(runs: runs, now: now)
         let stuckMinutes = config?.stuckMinutes ?? [:]
         runGroups = RunGroup.make(
             runs: runs, now: now, stuckMinutes: stuckMinutes, summaries: summaries, commits: commitCounts,
@@ -714,8 +717,13 @@ final class AppModel {
         return health.startBlocker(for: route(for: issue, config: config))?.detail
     }
 
+    /// The ticket's Start was clicked and its run has not appeared yet: its button reads "Starting…".
+    func isStarting(_ issue: JiraIssue) -> Bool {
+        startingTickets.contains(issue.key)
+    }
+
     func startTicket(_ issue: JiraIssue) {
-        guard let config else { return }
+        guard let config, !startingTickets.contains(issue.key) else { return }
         let route = route(for: issue, config: config)
         if let blocker = health.startBlocker(for: route) {
             Alerts.show(AlertText(
@@ -748,6 +756,7 @@ final class AppModel {
                     let command = try SessionCommand.start(
                         key: issue.key, repoPath: choice.repo.expandedPath, permissionMode: config.permissionMode
                     )
+                    startingTickets.mark(issue.key, at: Date())
                     if terminalChoice.isScriptable {
                         startInScriptable(command, directory: choice.repo.expandedPath, key: issue.key)
                     } else {
@@ -789,7 +798,11 @@ final class AppModel {
     /// which cannot run one, only reports it.
     private func startInScriptable(_ command: String, directory: String, key: String) {
         let starting = "\(key)|\(directory)"
-        guard !scriptableStarting.contains(starting), let controller = scriptableController() else { return }
+        guard !scriptableStarting.contains(starting) else { return }
+        guard let controller = scriptableController() else {
+            startingTickets.clear(key)
+            return
+        }
         let fallsBack = terminalChoice.isGhostty
         scriptableStarting.insert(starting)
         Task { [weak self] in
@@ -802,6 +815,8 @@ final class AppModel {
             reportScriptableFailure(failure)
             if fallsBack {
                 terminal()?.open(command)
+            } else {
+                startingTickets.clear(key)
             }
         }
     }
