@@ -145,9 +145,12 @@ final class AppModel {
 
     @ObservationIgnored private let paths = StatePaths()
     @ObservationIgnored private let runner = SystemProcessRunner(timeout: 20)
-    @ObservationIgnored private var ghosttyAlertsShown: Set<String> = []
-    @ObservationIgnored private var ghosttyBusyRuns: Set<String> = []
-    @ObservationIgnored private let ghosttyRunner = SystemProcessRunner(timeout: 300)
+    @ObservationIgnored private var scriptableAlertsShown: Set<String> = []
+    @ObservationIgnored private var scriptableBusyRuns: Set<String> = []
+    /// "<key>|<repo>" of the starts still opening their tab: a second Start meanwhile is ignored.
+    @ObservationIgnored private var scriptableStarting: Set<String> = []
+    // Long enough to answer Ghostty's Automation prompt, finite so a hung call cannot block a run forever.
+    @ObservationIgnored private let scriptableRunner = SystemProcessRunner(timeout: 300)
     /// `claude plugin marketplace update` may clone a repository: generous, but finite.
     @ObservationIgnored private let pluginRunner = SystemProcessRunner(timeout: 300)
     /// For `git worktree remove` and `du` on a big worktree, which must not be killed midway.
@@ -745,8 +748,8 @@ final class AppModel {
                     let command = try SessionCommand.start(
                         key: issue.key, repoPath: choice.repo.expandedPath, permissionMode: config.permissionMode
                     )
-                    if terminalChoice.isGhostty {
-                        startInGhostty(command, directory: choice.repo.expandedPath, title: issue.key)
+                    if terminalChoice.isScriptable {
+                        startInScriptable(command, directory: choice.repo.expandedPath, key: issue.key)
                     } else {
                         terminal()?.open(command)
                     }
@@ -757,26 +760,61 @@ final class AppModel {
         }
     }
 
-    /// Opens a new Ghostty tab in the repo and types the start command there, so the tab's folder is the
-    /// repo's; the `.command` launcher only when scripting Ghostty fails.
-    private func startInGhostty(_ command: String, directory: String, title: String) {
-        let controller = GhosttyController(runner: ghosttyRunner)
+    /// The controller of the chosen scriptable terminal; nil (after an alert) when Orca's CLI is missing.
+    private func scriptableController() -> (any ScriptableTerminal)? {
+        if terminalChoice.isGhostty {
+            return GhosttyController(runner: scriptableRunner)
+        }
+        guard let cli = OrcaController.cliPath() else {
+            reportScriptableFailure(OrcaError.notInstalled)
+            return nil
+        }
+        return OrcaController(runner: scriptableRunner, cli: cli)
+    }
+
+    /// Tab title for a run's session: Orca shows it as set; Ghostty lets Claude Code title its tab.
+    private nonisolated static func tabTitle(key: String) -> String {
+        "\(key) · claude"
+    }
+
+    /// A failure of the scriptable terminal, shown once per terminal and kind.
+    private func reportScriptableFailure(_ failure: any ScriptableTerminalError) {
+        if scriptableAlertsShown.insert("\(terminalChoice.appName).\(failure.alertKey)").inserted {
+            Alerts.show(failure.alertText)
+        }
+    }
+
+    /// Opens a new tab of the scriptable terminal in the repo running the start command, so the tab's
+    /// folder is the repo's. When scripting fails, Ghostty falls back to the `.command` launcher; Orca,
+    /// which cannot run one, only reports it.
+    private func startInScriptable(_ command: String, directory: String, key: String) {
+        let starting = "\(key)|\(directory)"
+        guard !scriptableStarting.contains(starting), let controller = scriptableController() else { return }
+        let fallsBack = terminalChoice.isGhostty
+        scriptableStarting.insert(starting)
         Task { [weak self] in
-            let failure = await Task.detached { () -> GhosttyError? in
-                do {
-                    try controller.openTab(directory: directory, command: command, title: title)
-                    return nil
-                } catch let error as GhosttyError {
-                    return error
-                } catch {
-                    return .scriptFailed("\(error)")
-                }
+            let failure = await Task.detached { () -> (any ScriptableTerminalError)? in
+                Self.attempt { try controller.openTab(directory: directory, command: command, title: Self.tabTitle(key: key)) }
             }.value
-            guard let self, let failure else { return }
-            if ghosttyAlertsShown.insert(failure.kind).inserted {
-                Alerts.show(failure.alertText)
+            guard let self else { return }
+            scriptableStarting.remove(starting)
+            guard let failure else { return }
+            reportScriptableFailure(failure)
+            if fallsBack {
+                terminal()?.open(command)
             }
-            terminal()?.open(command)
+        }
+    }
+
+    /// Runs a scriptable-terminal action, returning its failure.
+    private nonisolated static func attempt(_ action: () throws -> Void) -> (any ScriptableTerminalError)? {
+        do {
+            try action()
+            return nil
+        } catch let error as any ScriptableTerminalError {
+            return error
+        } catch {
+            return OrcaError.commandFailed("\(error)")
         }
     }
 
@@ -818,8 +856,8 @@ final class AppModel {
             return
         }
         let action = SessionAction.forOpening(run)
-        if config != nil, terminalChoice.isGhostty {
-            openInGhostty(run, action: action)
+        if config != nil, terminalChoice.isScriptable {
+            openInScriptable(run, action: action)
             return
         }
         switch action {
@@ -830,14 +868,15 @@ final class AppModel {
         }
     }
 
-    /// Focuses the run's Ghostty tab, else opens its session in a new tab. A session believed ended only
-    /// reuses a tab titled like Claude Code, never a plain shell; a session with no tab is resumed in a new
-    /// one, even when recorded running. `findTab` is false for the explicit
-    /// "Resume" and for a run without session, which always open a new tab. A scripting failure is reported
-    /// once per kind; then (tab list unreadable) a live session just brings Ghostty to the front and anything else goes through
-    /// the `.command` launcher.
-    private func openInGhostty(_ run: Run, action: SessionAction, findTab: Bool = true) {
-        guard !ghosttyBusyRuns.contains(run.id) else { return }
+    /// Focuses the run's tab in the scriptable terminal, else opens its session in a new tab. A session
+    /// believed ended only reuses a tab titled like Claude Code, never a plain shell; a session with no tab
+    /// is resumed in a new one, even when recorded running. `findTab` is false for the explicit "Resume"
+    /// and for a run without session, which always open a new tab. A failure is reported once per kind;
+    /// then, with Ghostty, a live session just brings Ghostty to the front and anything else goes through
+    /// the `.command` launcher. Orca opens its tab in the repo's main checkout, the folder Orca knows (the
+    /// command changes to the session's folder itself), and has no fallback.
+    private func openInScriptable(_ run: Run, action: SessionAction, findTab: Bool = true) {
+        guard !scriptableBusyRuns.contains(run.id) else { return }
         let command: String
         do {
             command = try SessionCommand.resume(run, permissionMode: config?.permissionMode)
@@ -845,45 +884,45 @@ final class AppModel {
             Alerts.show(AlertText(title: "\(run.key) cannot resume", message: "\(error)"))
             return
         }
-        // Long enough to answer the Automation prompt, finite so a hung osascript cannot block the run forever.
-        let controller = GhosttyController(runner: ghosttyRunner)
-        let folders = SessionLocator.candidateFolders(for: run)
-        let directory = SessionCommand.resumeDirectory(for: run)
+        guard let controller = scriptableController() else { return }
+        let folders = terminalChoice.sessionFolders(SessionLocator.candidateFolders(for: run))
+        let directory = terminalChoice.isOrca ? run.repoPath : SessionCommand.resumeDirectory(for: run)
+        let fallsBack = terminalChoice.isGhostty
+        // With Orca, the tab named after the key is the session even before the run recorded it (a run
+        // without session yet, or an explicit Resume): look for it first, so a live session is never doubled.
+        let keyNamesTheSession = terminalChoice.keyNamesTheSession
+        let searchesTab = keyNamesTheSession || (findTab && action != .start)
         let runID = run.id
         let key = run.key
         let live = action == .bringToFront
-        ghosttyBusyRuns.insert(run.id)
+        scriptableBusyRuns.insert(run.id)
         Task { [weak self] in
-            let failure = await Task.detached { () -> GhosttyError? in
-                do {
-                    if findTab, action != .start {
+            let failure = await Task.detached { () -> (any ScriptableTerminalError)? in
+                Self.attempt {
+                    if searchesTab {
                         // The tab list is authoritative: no matching tab means the session is closed.
                         let terminals = try controller.listTerminals()
-                        switch action.scriptableOutcome(terminals: terminals, key: key, folders: folders) {
+                        switch action.scriptableOutcome(
+                            terminals: terminals, key: key, folders: folders, keyNamesTheSession: keyNamesTheSession
+                        ) {
                         case let .focus(terminalID):
                             try controller.focus(terminalID: terminalID)
-                            return nil
+                            return
                         case .bringToFront:
                             try controller.activate()
-                            return nil
+                            return
                         case .openNewTab:
                             break
                         }
                     }
-                    try controller.openTab(directory: directory, command: command, title: key)
-                    return nil
-                } catch let error as GhosttyError {
-                    return error
-                } catch {
-                    return .scriptFailed("\(error)")
+                    try controller.openTab(directory: directory, command: command, title: Self.tabTitle(key: key))
                 }
             }.value
             guard let self else { return }
-            ghosttyBusyRuns.remove(runID)
+            scriptableBusyRuns.remove(runID)
             guard let failure else { return }
-            if ghosttyAlertsShown.insert(failure.kind).inserted {
-                Alerts.show(failure.alertText)
-            }
+            reportScriptableFailure(failure)
+            guard fallsBack else { return }
             if live {
                 terminal()?.activate()
             } else {
@@ -898,8 +937,8 @@ final class AppModel {
 
     private func resumeNow(runID: String) {
         guard let run = runs.first(where: { $0.id == runID }) else { return }
-        if config != nil, terminalChoice.isGhostty {
-            openInGhostty(run, action: .resume, findTab: false)
+        if config != nil, terminalChoice.isScriptable {
+            openInScriptable(run, action: .resume, findTab: false)
             return
         }
         resumeWithLauncher(runID: runID)

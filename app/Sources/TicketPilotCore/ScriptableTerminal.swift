@@ -5,6 +5,12 @@ public protocol ScriptableTerminalError: Error, Sendable {
     /// Identifies the kind of error, whatever its message.
     var kind: String { get }
     var alertText: AlertText { get }
+    /// What identifies an alert already shown: the kind by default.
+    var alertKey: String { get }
+}
+
+public extension ScriptableTerminalError {
+    var alertKey: String { kind }
 }
 
 /// A terminal app TicketPilot drives itself (Ghostty through AppleScript, Orca through its CLI): it lists

@@ -6,15 +6,36 @@ public struct TerminalChoice: Equatable, Sendable {
     public var appName: String
 
     /// Terminals the app can pick without being told, by the name of their `.app` bundle.
-    public static let knownTerminals = ["Ghostty", "iTerm", "Warp", "WezTerm", "kitty"]
+    public static let knownTerminals = ["Ghostty", "Orca", "iTerm", "Warp", "WezTerm", "kitty"]
 
-    /// Ghostty is scriptable: sessions are opened in, and found by, its tabs.
+    /// Ghostty and Orca are scriptable: sessions are opened in, and found by, their tabs.
     public init(appName: String) {
         self.appName = appName
     }
 
     public var isGhostty: Bool {
         appName.caseInsensitiveCompare("Ghostty") == .orderedSame
+    }
+
+    public var isOrca: Bool {
+        appName.caseInsensitiveCompare("Orca") == .orderedSame
+    }
+
+    /// The folders a session's tab is searched in. Orca reports for every tab of a repo the repo's main
+    /// checkout, which says nothing about the ticket: its tabs are found by their title only.
+    public func sessionFolders(_ folders: [String]) -> [String] {
+        isOrca ? [] : folders
+    }
+
+    /// A tab titled with the run's key is its session, even before the run recorded one or when the title
+    /// is not Claude Code's: TicketPilot names Orca's tabs after the key, and Claude Code keeps the key.
+    public var keyNamesTheSession: Bool {
+        isOrca
+    }
+
+    /// A terminal driven through `ScriptableTerminal` rather than the `.command` launcher.
+    public var isScriptable: Bool {
+        isGhostty || isOrca
     }
 
     /// In order: the configured `terminal_app`; the known terminal hosting a running Claude Code; the
@@ -64,9 +85,11 @@ public struct TerminalChoice: Equatable, Sendable {
         return options.first { $0.caseInsensitiveCompare(name) == .orderedSame }
     }
 
-    /// The canonical name of a known terminal; "iTerm2" is how iTerm often calls itself.
+    /// The canonical name of a known terminal; "iTerm2" is how iTerm often calls itself, and "Orca Agents"
+    /// is the app hosting Orca's terminal tabs.
     static func known(_ name: String) -> String? {
-        let name = name.caseInsensitiveCompare("iTerm2") == .orderedSame ? "iTerm" : name
+        let aliases = ["iTerm2": "iTerm", "Orca Agents": "Orca"]
+        let name = aliases.first { $0.key.caseInsensitiveCompare(name) == .orderedSame }?.value ?? name
         return knownTerminals.first { $0.caseInsensitiveCompare(name) == .orderedSame }
     }
 }
