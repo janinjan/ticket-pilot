@@ -494,6 +494,40 @@ import Testing
         #expect(ids == ["ABC-1-ios", "ABC-4-ios"])
     }
 
+    @Test func test_runWithoutWorktreeAndWithItsSessionClosedCanBeRemoved() {
+        // Waiting for the go, its tab closed: the ticket can go back to Start.
+        let run = Run(
+            id: "ABC-1-ios", key: "ABC-1", repo: "ios", repoPath: "/r", worktree: nil, branch: nil,
+            sessionID: "s1", session: .init(state: "ended", lastNotification: nil, notifiedAt: nil),
+            step: 1, stepName: "understand", status: .waiting, waiting: nil, history: [], updatedAt: Date()
+        )
+        #expect(Releasable.runIDs(runs: [run], categories: [:]) == ["ABC-1-ios"])
+        // The menu and the confirmation say where the ticket goes: back to its Start button.
+        #expect(Releasable.actionTitle(for: run) == "Back to Start…")
+        let plan = ReleasePlan.make(run: run, runsDirectory: URL(fileURLWithPath: "/runs"))
+        #expect(plan.question == "Put ABC-1 · ios back to Start?")
+        #expect(plan.outcome == "The run is forgotten; ABC-1 is listed again with its Start button.")
+        #expect(plan.confirmTitle == "Back to Start")
+    }
+
+    @Test func test_runWithALiveSessionOrAWorktreeIsNotRemovableBeforeItsEnd() throws {
+        let f = try makeFixture()
+        defer { f.cleanUp() }
+        func run(_ id: String, worktree: String?, state: String) -> Run {
+            Run(
+                id: id, key: id, repo: "ios", repoPath: "/r", worktree: worktree, branch: nil,
+                sessionID: "s1", session: .init(state: state, lastNotification: nil, notifiedAt: nil),
+                step: 1, stepName: "understand", status: .waiting, waiting: nil, history: [], updatedAt: Date()
+            )
+        }
+        let runs = [
+            run("live", worktree: nil, state: "running"),
+            run("asking", worktree: nil, state: "waiting"),
+            run("coded", worktree: f.worktree.path, state: "ended"),
+        ]
+        #expect(Releasable.runIDs(runs: runs, categories: [:]).isEmpty)
+    }
+
     @Test func test_diskUsageReadsKilobytes() throws {
         let f = try makeFixture()
         defer { f.cleanUp() }
