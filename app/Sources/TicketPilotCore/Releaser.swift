@@ -12,6 +12,10 @@ public struct ReleasePlan: Equatable, Sendable {
     public var lines: [String]
     /// The confirmation's question, named after what goes: the worktree, or only the run's card.
     public var question: String
+    /// What becomes of the ticket afterwards, when it is not plain: a run stopped early comes back to Start.
+    public var outcome: String? = nil
+    /// The confirmation's button.
+    public var confirmTitle: String = "Delete"
 
     /// `checkedOutBranch` is the branch checked out in the run's worktree (`Releaser.checkedOutBranch`), when
     /// the work went on there after the run.
@@ -31,12 +35,17 @@ public struct ReleasePlan: Equatable, Sendable {
         if present, let worktree = run.worktree { lines.append("Worktree: \(worktree)") }
         lines += branches.map { "Local branch: \($0)" }
         lines.append("Run state: \(runFile.path)")
+        let backToStart = Releasable.goesBackToStart(run)
         let question = present
             ? "Remove the worktree of \(run.key) · \(run.repo)?"
+            : backToStart
+            ? "Put \(run.key) · \(run.repo) back to Start?"
             : "Remove \(run.key) · \(run.repo) from the list?"
         return ReleasePlan(
             runID: run.id, repoPath: run.repoPath, worktree: run.worktree, branches: branches,
-            runFile: runFile, mainBranch: mainBranch, lines: lines, question: question
+            runFile: runFile, mainBranch: mainBranch, lines: lines, question: question,
+            outcome: backToStart ? "The run is forgotten; \(run.key) is listed again with its Start button." : nil,
+            confirmTitle: backToStart ? "Back to Start" : "Delete"
         )
     }
 }
@@ -44,8 +53,15 @@ public struct ReleasePlan: Equatable, Sendable {
 public enum Releasable {
     /// The card's menu item: "Remove worktree…", or "Remove from the list…" for a run whose worktree is
     /// gone or never was (stopped before step 2, for a ticket already done).
+    /// A run stopped before its worktree, not finished, reads "Back to Start…": that is where its ticket goes.
     public static func actionTitle(for run: Run) -> String {
-        worktreeExists(run) ? "Remove worktree…" : "Remove from the list…"
+        if worktreeExists(run) { return "Remove worktree…" }
+        return goesBackToStart(run) ? "Back to Start…" : "Remove from the list…"
+    }
+
+    /// A run stopped early (`stoppedEarly`) that is not finished: removing it puts its ticket back to Start.
+    static func goesBackToStart(_ run: Run) -> Bool {
+        run.status != .done && stoppedEarly(run)
     }
 
     /// The run's worktree folder is still on disk.
@@ -53,9 +69,17 @@ public enum Releasable {
         run.worktree.map { FileManager.default.fileExists(atPath: $0) } ?? false
     }
 
-    /// Runs that are finished, or whose ticket is Done in Jira (a run left before its end).
+    /// Runs that are finished, or whose ticket is Done in Jira (a run left before its end), or that have no
+    /// worktree and a closed session (a run stopped early, waiting for the go for example): removing one
+    /// puts its ticket back to Start. A run with a live session is never offered: close its session first.
     public static func runIDs(runs: [Run], categories: [String: JiraIssue.StatusCategory]) -> Set<String> {
-        Set(runs.filter { $0.status == .done || categories[$0.key] == .done }.map(\.id))
+        Set(runs.filter { $0.status == .done || categories[$0.key] == .done || stoppedEarly($0) }.map(\.id))
+    }
+
+    /// No worktree on disk and a session recorded as ended: nothing of the run would be lost but its file.
+    static func stoppedEarly(_ run: Run) -> Bool {
+        guard !worktreeExists(run), let state = run.session?.state else { return false }
+        return state != "running" && state != "waiting"
     }
 }
 

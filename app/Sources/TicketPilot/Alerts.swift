@@ -29,7 +29,8 @@ enum Alerts {
         let alert = NSAlert()
         alert.messageText = plan.question
         alert.informativeText = "This deletes:\n" + plan.lines.joined(separator: "\n")
-        alert.addButton(withTitle: "Delete")
+            + (plan.outcome.map { "\n\n" + $0 } ?? "")
+        alert.addButton(withTitle: plan.confirmTitle)
         alert.addButton(withTitle: "Cancel")
         NSApp.activate()
         return alert.runModal() == .alertFirstButtonReturn
