@@ -1,6 +1,6 @@
 import Foundation
 
-public enum GhosttyError: Error, Equatable, Sendable {
+public enum GhosttyError: ScriptableTerminalError, Equatable {
     /// Automation permission for Ghostty was refused (error -1743).
     case permissionDenied
     /// The script did not finish: most likely the Automation prompt was left unanswered.
@@ -42,7 +42,7 @@ public enum GhosttyError: Error, Equatable, Sendable {
 
 /// Drives Ghostty (1.3 or later) through its AppleScript dictionary with `/usr/bin/osascript`.
 /// It only lists and focuses terminals, and opens a new tab; it never types into an existing one.
-public struct GhosttyController: Sendable {
+public struct GhosttyController: ScriptableTerminal {
     public var runner: ProcessRunning
 
     private static let osascript = "/usr/bin/osascript"
@@ -86,7 +86,8 @@ public struct GhosttyController: Sendable {
     }
 
     /// Opens a new tab (a new window when none is open) in `directory` and types `command` in it.
-    public func openTab(directory: String, command: String) throws {
+    /// Ghostty titles its tab itself (Claude Code names it after the ticket): `title` is not used.
+    public func openTab(directory: String, command: String, title: String) throws {
         _ = try execute("""
         tell application "Ghostty"
             activate

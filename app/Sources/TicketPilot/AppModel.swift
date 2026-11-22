@@ -746,7 +746,7 @@ final class AppModel {
                         key: issue.key, repoPath: choice.repo.expandedPath, permissionMode: config.permissionMode
                     )
                     if terminalChoice.isGhostty {
-                        startInGhostty(command, directory: choice.repo.expandedPath)
+                        startInGhostty(command, directory: choice.repo.expandedPath, title: issue.key)
                     } else {
                         terminal()?.open(command)
                     }
@@ -759,12 +759,12 @@ final class AppModel {
 
     /// Opens a new Ghostty tab in the repo and types the start command there, so the tab's folder is the
     /// repo's; the `.command` launcher only when scripting Ghostty fails.
-    private func startInGhostty(_ command: String, directory: String) {
+    private func startInGhostty(_ command: String, directory: String, title: String) {
         let controller = GhosttyController(runner: ghosttyRunner)
         Task { [weak self] in
             let failure = await Task.detached { () -> GhosttyError? in
                 do {
-                    try controller.openTab(directory: directory, command: command)
+                    try controller.openTab(directory: directory, command: command, title: title)
                     return nil
                 } catch let error as GhosttyError {
                     return error
@@ -859,18 +859,18 @@ final class AppModel {
                     if findTab, action != .start {
                         // The tab list is authoritative: no matching tab means the session is closed.
                         let terminals = try controller.listTerminals()
-                        switch action.ghosttyOutcome(terminals: terminals, key: key, folders: folders) {
+                        switch action.scriptableOutcome(terminals: terminals, key: key, folders: folders) {
                         case let .focus(terminalID):
                             try controller.focus(terminalID: terminalID)
                             return nil
-                        case .bringGhosttyToFront:
+                        case .bringToFront:
                             try controller.activate()
                             return nil
                         case .openNewTab:
                             break
                         }
                     }
-                    try controller.openTab(directory: directory, command: command)
+                    try controller.openTab(directory: directory, command: command, title: key)
                     return nil
                 } catch let error as GhosttyError {
                     return error

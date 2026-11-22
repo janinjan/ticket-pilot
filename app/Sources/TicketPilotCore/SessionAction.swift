@@ -9,22 +9,27 @@ public enum SessionAction: Equatable, Sendable {
     /// The run never had a session: start one.
     case start
 
-    /// What to do with Ghostty, which is scriptable: its tab list is authoritative.
-    public enum GhosttyOutcome: Equatable, Sendable {
+    /// What to do with a scriptable terminal (Ghostty, Orca): its tab list is authoritative.
+    public enum ScriptableOutcome: Equatable, Sendable {
         case focus(terminalID: String)
         case openNewTab
-        case bringGhosttyToFront
+        /// Bring the terminal app to the front without choosing a tab.
+        case bringToFront
     }
 
     /// `terminals` is the tab list, nil when it could not be read. A tab that matches the run is focused;
     /// when none does the session is closed, whatever its recorded state, and is resumed in a new tab.
-    /// Only an unreadable list protects a live session from being started a second time.
-    public func ghosttyOutcome(terminals: [TerminalSurface]?, key: String, folders: [String]) -> GhosttyOutcome {
+    /// Only an unreadable list protects a live session from being started a second time. With
+    /// `keyNamesTheSession`, a tab titled with the key is the session whatever the rest of its title.
+    public func scriptableOutcome(
+        terminals: [TerminalSurface]?, key: String, folders: [String], keyNamesTheSession: Bool = false
+    ) -> ScriptableOutcome {
         guard let terminals else {
-            return self == .bringToFront ? .bringGhosttyToFront : .openNewTab
+            return self == .bringToFront ? ScriptableOutcome.bringToFront : .openNewTab
         }
         let live = self == .bringToFront
-        if let id = SessionLocator.pickTerminal(terminals, key: key, folders: folders, claudeOnly: !live) {
+        let claudeOnly = !live && !keyNamesTheSession
+        if let id = SessionLocator.pickTerminal(terminals, key: key, folders: folders, claudeOnly: claudeOnly) {
             return .focus(terminalID: id)
         }
         return .openNewTab
