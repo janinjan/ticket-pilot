@@ -433,11 +433,12 @@ struct PanelView: View {
             .frame(minWidth: 28, minHeight: 28)
             .contentShape(Rectangle())
             .accessibilityLabel("More for \(issue.key)")
-            Button("Start", action: closing { model.startTicket(issue) })
+            let starting = model.isStarting(issue)
+            Button(starting ? "Starting…" : "Start", action: closing { model.startTicket(issue) })
                 .buttonStyle(.brand)
-                .disabled(reason != nil)
-                .help(reason ?? "Start \(issue.key)")
-                .accessibilityLabel("Start \(issue.key)")
+                .disabled(reason != nil || starting)
+                .help(starting ? "Starting \(issue.key): its session is opening" : reason ?? "Start \(issue.key)")
+                .accessibilityLabel(starting ? "Starting \(issue.key)" : "Start \(issue.key)")
                 .accessibilityHint(reason.map { "Unavailable: \($0)" } ?? "")
         }
         .padding(.horizontal, 10)
@@ -445,7 +446,7 @@ struct PanelView: View {
         .contentShape(Rectangle())
         .contextMenu {
             Button("Start", action: closing { model.startTicket(issue) })
-                .disabled(reason != nil)
+                .disabled(reason != nil || model.isStarting(issue))
             Button("Open in Jira", action: closing { model.openInJira(issue) })
         }
     }
